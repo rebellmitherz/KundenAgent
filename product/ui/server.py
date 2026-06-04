@@ -45,7 +45,7 @@ _ui_token: str = ""
 # Kunden-Endpunkte: nie Token-Pflicht.
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
 _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
-                     "/api/agent/laeufe"}
+                     "/api/agent/laeufe", "/api/agent/antworten"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
@@ -99,6 +99,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_leads()
         elif self.path == "/api/agent/laeufe":
             self._serve_agent_laeufe()
+        elif self.path == "/api/agent/antworten":
+            self._serve_agent_antworten()
         elif self.path.split("?", 1)[0] == "/api/agent/lauf":
             if not self._ist_admin():
                 self._403(); return
@@ -202,6 +204,27 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             laeufe = []
         self._json({"laeufe": laeufe, "verfuegbar": True})
+
+    def _serve_agent_antworten(self):
+        """GET /api/agent/antworten — eingehende Antworten (read-only, kundenfähig).
+
+        Hebt Terminwünsche hervor. Kein Versand, nur Lesen.
+        """
+        if not _agent_runner:
+            self._json({"antworten": [], "termine": 0, "bericht": "", "verfuegbar": False})
+            return
+        try:
+            antworten = _agent_runner.antworten(limit=30)
+            termine = _agent_runner.termin_signale(limit=30)
+            bericht = _agent_runner.antworten_bericht(limit=30)
+        except Exception:
+            antworten, termine, bericht = [], [], ""
+        self._json({
+            "antworten": antworten,
+            "termine": len(termine),
+            "bericht": bericht,
+            "verfuegbar": True,
+        })
 
     def _serve_agent_lauf(self):
         """GET /api/agent/lauf?id=... — vollständiger Lauf (Admin, Maschinenraum)."""

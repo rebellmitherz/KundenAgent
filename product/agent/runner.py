@@ -17,6 +17,7 @@ from typing import Optional
 
 from product.agent.brain import Brain, Laufergebnis, baue_brain
 from product.agent.memory import LaufSpeicher
+from product.agent.replies import antworten_bericht, termine
 from product.agent.tools import AgentKontext
 from product.operator.order_schema import Auftrag, AuftragsStatus
 
@@ -111,6 +112,28 @@ class AgentRunner:
             "gesendet": ergebnis.leads_sauber,
             "meldung": ergebnis.meldung,
         }
+
+    # ----------------------------------------------------------------- Antworten (read-only)
+
+    def antworten(self, limit: int = 30) -> list[dict]:
+        """Liest eingehende Antworten (read-only) — kundenfähige Felder.
+
+        Kein Versand, nichts das senden könnte. Gibt [] wenn keine Bridge.
+        """
+        if self._bridge is None:
+            return []
+        try:
+            return self._bridge.antworten_lesen(limit=limit)
+        except Exception:
+            return []
+
+    def antworten_bericht(self, limit: int = 30) -> str:
+        """Kundenfähige Zusammenfassung der Antworten (hebt Terminwünsche hervor)."""
+        return antworten_bericht(self.antworten(limit=limit))
+
+    def termin_signale(self, limit: int = 30) -> list[dict]:
+        """Nur Antworten mit Terminwunsch — das harte Signal (für Phase D)."""
+        return termine(self.antworten(limit=limit))
 
     # ----------------------------------------------------------------- Lesen
 

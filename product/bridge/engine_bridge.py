@@ -236,6 +236,67 @@ class EngineBridge:
         except Exception:
             return []
 
+    def _reply_queue_pfad(self) -> Path:
+        return self._output_dir() / "reply_queue.json"
+
+    def _entry_key_firmen(self) -> dict:
+        """Map entry_key → Firmenname aus der Pipeline (für hübsche Anzeige)."""
+        pfad = self._pipeline_pfad()
+        if not pfad.exists():
+            return {}
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+            return {
+                e.get("entry_key", ""): e.get("company_name", "")
+                for e in data.get("entries", [])
+                if e.get("entry_key")
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _firma_aus_email(email: str) -> str:
+        """Fallback-Anzeigename aus der Absender-Domain."""
+        if "@" in email:
+            return email.split("@", 1)[1].strip()
+        return email.strip()
+
+    def antworten_lesen(self, limit: int = 30) -> list[dict]:
+        """V2 (read-only): Liest eingehende Antworten aus reply_queue.json.
+
+        REIN LESEND — kein mine.py-Aufruf, nichts das senden könnte. Gibt
+        kundenfähige Felder zurück (Firma, Betreff, Auszug, Klassifizierung,
+        Terminwunsch). Keine Roh-Mail, keine technischen IDs in der Anzeige.
+        """
+        pfad = self._reply_queue_pfad()
+        if not pfad.exists():
+            return []
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        items = data.get("items", []) if isinstance(data, dict) else []
+        firmen = self._entry_key_firmen()
+
+        out: list[dict] = []
+        for it in items:
+            ek = it.get("entry_key", "")
+            firma = firmen.get(ek) or self._firma_aus_email(it.get("from_email", ""))
+            out.append({
+                "firma":        firma or "Unbekannt",
+                "betreff":      it.get("inbound_subject", ""),
+                "auszug":       it.get("inbound_snippet", ""),
+                "klasse":       it.get("inbound_class", ""),
+                "sentiment":    it.get("sentiment", ""),
+                "terminwunsch": bool(it.get("appointment_ready")),
+                "termin_grund": it.get("appointment_reason", ""),
+                "kategorie":    it.get("reply_sales_category", ""),
+                "entry_key":    ek,
+            })
+            if len(out) >= limit:
+                break
+        return out
+
     # Engine-eigenes hartes Tor: Ein echter SMTP-Versand feuert nur, wenn diese
     # Umgebungsvariable gesetzt ist. Ohne sie macht die Engine "kein SMTP, kein
     # Versand". Wir setzen sie ausschliesslich scoped auf den einen Send-Aufruf
