@@ -121,9 +121,17 @@ product/agent/test_brain.py           26   (Phase A.2 — Agent-Loop)
 product/agent/test_memory.py          18   (Phase A.3 — Lauf-Speicher)
 product/agent/test_runner.py           8   (Phase A.5 — Runner)
 product/telegram/test_dialog_agent.py  4   (Phase A.5 — Dialog-Anbindung)
+product/bridge/test_freigabe.py        6   (Phase B.1 — Sende-Tor Bridge)
+product/agent/test_freigeben.py        7   (Phase B.1 — Runner-Freigabe)
                                      ----
-                                     = 208 grün
+                                     = 221 grün
 ```
+
+WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
+`OUTREACH_SEND_CONFIRMED=true` in der Subprozess-Umgebung. Die Bridge setzt das
+ausschließlich scoped beim Send-Schritt und nur bei `bestaetigt=True` (Mensch-
+Klick). `runner.freigeben()` verlangt zusätzlich Status `wartet_auf_mensch`.
+Der Agent-Loop sendet NIE (Sende-Werkzeuge gesperrt). UI: `/api/agent/freigeben`.
 
 Was schon LÄUFT:
 - ✅ **Agent-Loop (Phase A)**: Ziel → denkt (Claude/det.) → sucht + füllt selbst
@@ -242,7 +250,10 @@ A     Das Gehirn (Agent-Loop) ............ ✅ FERTIG
   A.3 agent/memory.py + 18 Tests ........ ✅ (commit b87969b)
   A.4 Tests agent/brain/memory/runner ... ✅ (83 Agent-Tests, Claude+Engine gemockt)
   A.5 agent/runner.py + Telegram + UI ... ✅ (commit f0fbcda, live verifiziert)
-B     Loops schließen (Send/Reply/Followup) ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+B     Loops schließen (Send/Reply/Followup) 🔄 in Arbeit
+  B.1 Senden nach Freigabe (human-gated)  ✅ (commit 34e2c44, +13 Tests)
+  B.2 Antworten lesen (process-replies) .. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+  B.3 Follow-up automatisch (followups) .. ⬜
 C     Kampagnen-Gedächtnis ............... ⬜
 D     Tore + Push-Meldungen .............. ⬜
 ```
