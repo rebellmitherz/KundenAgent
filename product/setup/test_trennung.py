@@ -170,8 +170,9 @@ class TestOnboardingUiToken(unittest.TestCase):
                 "123",
                 "../b2bbot",
                 "data",
+                "",              # Lizenz-Key (leer = überspringen)
                 "nein",          # Kein UI-Token
-                "j",
+                "j",             # Speichern
             ],
             secrets_=["tok456", ""],
         )

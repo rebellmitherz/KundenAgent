@@ -134,6 +134,20 @@ def setup_config(ziel: Path) -> bool:
     print("  Leer lassen = KI nicht aktiviert (deterministischer Modus).")
     api_key = _geheim("Anthropic API Key (leer = überspringen)", pflicht=False)
 
+    # ── Lizenz-Key ───────────────────────────────────────────────────────
+    print()
+    print("  Lizenz-Schlüssel (von Hermes erhalten).")
+    print("  Leer lassen = Entwicklungsmodus (alle Features aktiv).")
+    license_key = _eingabe("Lizenz-Schlüssel", default="", pflicht=False)
+    if license_key:
+        try:
+            from product.licensing.license import lizenz_pruefen
+            ld = lizenz_pruefen(license_key)
+            print(f"  → ✓ Lizenz gültig: {ld.zusammenfassung()}")
+        except Exception as e:
+            print(f"  → ✗ Lizenz ungültig: {e}")
+            print("    (Schlüssel wird trotzdem gespeichert — bitte prüfen.)")
+
     # ── UI-Token (Admin-Schutz für Mini-UI) ──────────────────────────────
     print()
     print("  Admin-Token für Mini-UI (Einrichtung & Freigabe schützen).")
@@ -155,6 +169,7 @@ def setup_config(ziel: Path) -> bool:
     print(f"  Engine:     {engine_abs}  ({_pfad_pruefen(engine_abs)})")
     print(f"  Daten:      {data_abs}")
     print(f"  KI-Key:     {'konfiguriert (' + _maskieren(api_key) + ')' if api_key else 'nicht konfiguriert'}")
+    print(f"  Lizenz:     {_maskieren(license_key) if license_key else 'nicht gesetzt (Entwicklungsmodus)'}")
     print(f"  UI-Token:   {'aktiv (' + _maskieren(ui_token) + ')' if ui_token else 'nicht gesetzt'}")
     print()
 
@@ -170,6 +185,7 @@ def setup_config(ziel: Path) -> bool:
         "engine_dir": engine_rel,
         "data_dir": data_rel,
         "anthropic_api_key": api_key,
+        "license_key": license_key,
         "ui_token": ui_token,
     }
     ziel.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,8 @@ sys.path.insert(0, str(_PRODUCT_ROOT))
 
 from product.bridge.engine_bridge import EngineBridge, EngineError
 from product.closer.closer_adapter import CloserAdapter
+from product.licensing.features import Feature
+from product.licensing.license import LizenzDaten, feature_erlaubt
 from product.operator.reporter import Reporter
 from product.telegram.config import laden as config_laden
 
@@ -32,6 +34,7 @@ PORT = 8767
 _reporter: Reporter | None = None
 _bridge: EngineBridge | None = None
 _closer: CloserAdapter | None = None
+_lizenz: LizenzDaten | None = None   # None = Entwicklungsmodus, alle Features
 
 # Admin-Token (aus Config geladen, leer = kein Schutz aktiv)
 _ui_token: str = ""
@@ -49,6 +52,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass   # Keine Konsolen-Spam bei jedem Request
+
+    def _ist_feature_aktiv(self, feature: Feature) -> bool:
+        return feature_erlaubt(_lizenz, feature)
+
+    def _403_feature(self, feature: Feature) -> None:
+        body = json.dumps(
+            {"ok": False, "meldung": f"Feature '{feature.value}' nicht in Ihrem Lizenz-Paket."},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _ist_admin(self) -> bool:
         """True wenn kein Token konfiguriert ODER gültiger Token im Header."""
@@ -98,6 +115,8 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/freigabe":
             if not self._ist_admin():
                 self._403(); return
+            if not self._ist_feature_aktiv(Feature.FREIGABE):
+                self._403_feature(Feature.FREIGABE); return
             self._handle_freigabe()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
@@ -110,6 +129,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/closer/starten":
             if not self._ist_admin():
                 self._403(); return
+            if not self._ist_feature_aktiv(Feature.CLOSER):
+                self._403_feature(Feature.CLOSER); return
             self._handle_closer_starten()
         elif self.path == "/api/closer/stoppen":
             if not self._ist_admin():
@@ -345,14 +366,19 @@ def _engine_dir_ermitteln() -> Path:
 
 
 def main():
-    global _reporter, _bridge, _ui_token, _closer
+    global _reporter, _bridge, _ui_token, _closer, _lizenz
 
-    # Admin-Token laden (optional — leer = kein Schutz)
+    # Config + Lizenz laden (optional — leer = Entwicklungsmodus)
     try:
         cfg = config_laden()
         if cfg.ui_token:
             _ui_token = cfg.ui_token
             print("[ui] Admin-Token aktiv — Einrichtung/Freigabe geschützt.")
+        if cfg.lizenz:
+            _lizenz = cfg.lizenz
+            print(f"[ui] Lizenz: {cfg.lizenz.zusammenfassung()}")
+        else:
+            print("[ui] Lizenz: Entwicklungsmodus — alle Features aktiv.")
     except Exception:
         pass
 

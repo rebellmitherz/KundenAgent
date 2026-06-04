@@ -15,6 +15,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from product.licensing.license import LizenzDaten, lizenz_laden
+
 # Config liegt direkt im product/-Ordner
 _CONFIG_BEISPIEL = Path(__file__).parent.parent / "product_config.example.json"
 _CONFIG_PFAD_DEFAULT = Path(__file__).parent.parent / "product_config.json"
@@ -28,6 +30,8 @@ class OperatorConfig:
     data_dir: Path
     anthropic_api_key: str = ""   # optional — nie loggen
     ui_token: str = ""            # optional — schützt Admin-Tabs in der Mini-UI
+    license_key: str = ""         # optional — leer = Entwicklungsmodus (alle Features)
+    lizenz: LizenzDaten | None = None  # geladen beim Start, nie loggen
 
     @property
     def orders_dir(self) -> Path:
@@ -67,6 +71,8 @@ def laden(config_pfad: Path | None = None) -> OperatorConfig:
     api_key = d.get("anthropic_api_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
 
     ui_token = d.get("ui_token", "").strip()
+    license_key = d.get("license_key", "").strip()
+    lizenz = lizenz_laden(license_key)  # None wenn kein Key → Entwicklungsmodus
 
     return OperatorConfig(
         bot_token=token,
@@ -75,4 +81,6 @@ def laden(config_pfad: Path | None = None) -> OperatorConfig:
         data_dir=data_dir,
         anthropic_api_key=api_key,
         ui_token=ui_token,
+        license_key=license_key,
+        lizenz=lizenz,
     )

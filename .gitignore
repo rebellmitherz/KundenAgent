@@ -2,6 +2,9 @@
 b2bbot/
 ClouseAgent/
 
+# Lizenzgenerator — NUR beim Verkäufer, nie im Kundenpaket
+product/licensing/keygen.py
+
 # Secrets — niemals einchecken
 product/product_config.json
 product/product_smtp.json

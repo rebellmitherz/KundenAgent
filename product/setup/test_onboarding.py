@@ -131,9 +131,9 @@ class TestSetupConfig(unittest.TestCase):
     def test_abbruch(self):
         """Nutzer sagt Nein bei Bestätigung → kein Schreiben."""
         ok = self._run(
-            inputs=["123456789", "../b2bbot", "data", "nein", "n"],
-            #                                               ^         ^
-            #                                     ui_token?=nein  speichern?=n
+            inputs=["123456789", "../b2bbot", "data", "", "nein", "n"],
+            #                                          ^    ^        ^
+            #                                 lizenz=leer  ui=nein  speichern=n
             secrets=["testtoken12345", ""],
         )
         assert ok is False
