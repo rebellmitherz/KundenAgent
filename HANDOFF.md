@@ -123,8 +123,10 @@ product/agent/test_runner.py           8   (Phase A.5 — Runner)
 product/telegram/test_dialog_agent.py  4   (Phase A.5 — Dialog-Anbindung)
 product/bridge/test_freigabe.py        6   (Phase B.1 — Sende-Tor Bridge)
 product/agent/test_freigeben.py        7   (Phase B.1 — Runner-Freigabe)
+product/bridge/test_antworten.py       5   (Phase B.2 — Antworten lesen)
+product/agent/test_replies.py          7   (Phase B.2 — Antworten-Bericht)
                                      ----
-                                     = 221 grün
+                                     = 233 grün
 ```
 
 WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
@@ -132,6 +134,13 @@ WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
 ausschließlich scoped beim Send-Schritt und nur bei `bestaetigt=True` (Mensch-
 Klick). `runner.freigeben()` verlangt zusätzlich Status `wartet_auf_mensch`.
 Der Agent-Loop sendet NIE (Sende-Werkzeuge gesperrt). UI: `/api/agent/freigeben`.
+
+WICHTIG (Antworten-Modell, B.2): `bridge.antworten_lesen()` LIEST nur
+`output/reply_queue.json` (kein Subprozess, kein Versand). Diese Datei füllt die
+Engine, wenn `mine.py --outreach process-replies` läuft (IMAP-Abruf + Klassi-
+fizierung). Den Abruf-TRIGGER haben wir bewusst NICHT gebaut (process-replies
+kann mit `REPLY_AUTO_SEND=true` Auto-Antworten senden). Falls später nötig: nur
+mit `REPLY_AUTO_SEND=false` scoped — analog zum Sende-Tor in B.1.
 
 Was schon LÄUFT:
 - ✅ **Agent-Loop (Phase A)**: Ziel → denkt (Claude/det.) → sucht + füllt selbst
@@ -252,8 +261,8 @@ A     Das Gehirn (Agent-Loop) ............ ✅ FERTIG
   A.5 agent/runner.py + Telegram + UI ... ✅ (commit f0fbcda, live verifiziert)
 B     Loops schließen (Send/Reply/Followup) 🔄 in Arbeit
   B.1 Senden nach Freigabe (human-gated)  ✅ (commit 34e2c44, +13 Tests)
-  B.2 Antworten lesen (process-replies) .. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
-  B.3 Follow-up automatisch (followups) .. ⬜
+  B.2 Antworten lesen + melden (read-only) ✅ (commit 47860a6, +12 Tests)
+  B.3 Follow-up automatisch (followups) .. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
 C     Kampagnen-Gedächtnis ............... ⬜
 D     Tore + Push-Meldungen .............. ⬜
 ```
