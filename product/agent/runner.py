@@ -67,6 +67,51 @@ class AgentRunner:
             speicher=self._speicher,
         )
 
+    # ----------------------------------------------------------------- Hartes Tor: Senden
+
+    def freigeben(
+        self, auftrags_id: str, limit: int = 20, *, bestaetigt: bool = False
+    ) -> dict:
+        """Versendet die Mails eines Laufs — NUR nach menschlicher Bestätigung.
+
+        Dreifache Absicherung (fail-closed):
+          1. bestaetigt muss True sein (menschlicher Freigabe-Klick).
+          2. Der Lauf muss existieren UND am harten Tor stehen
+             (Status 'wartet_auf_mensch') — kein Senden für unfertige Läufe,
+             kein versehentliches Doppel-Senden.
+          3. Die Bridge erzwingt die Sende-Bestätigung zusätzlich technisch.
+        Der Agent-Loop ruft diese Methode NIE — sie ist kein Werkzeug.
+        """
+        if not bestaetigt:
+            return {"ok": False, "meldung": "Freigabe ohne Bestätigung abgelehnt."}
+
+        rec = self._speicher.lesen(auftrags_id)
+        if rec is None:
+            return {"ok": False, "meldung": "Unbekannter Lauf — nichts zu senden."}
+        if rec.get("status") != "wartet_auf_mensch":
+            return {
+                "ok": False,
+                "meldung": (
+                    f"Lauf ist nicht freigabebereit (Status: {rec.get('status')}). "
+                    "Freigabe nur möglich, wenn der Agent am Tor wartet."
+                ),
+            }
+        if self._bridge is None:
+            return {"ok": False, "meldung": "Engine nicht verbunden."}
+
+        ergebnis = self._bridge.freigabe_ausfuehren(limit=limit, bestaetigt=True)
+        self._speicher.freigabe_aufzeichnen(
+            auftrags_id,
+            gesendet=ergebnis.leads_sauber,
+            meldung=ergebnis.meldung,
+            ok=ergebnis.ok,
+        )
+        return {
+            "ok": ergebnis.ok,
+            "gesendet": ergebnis.leads_sauber,
+            "meldung": ergebnis.meldung,
+        }
+
     # ----------------------------------------------------------------- Lesen
 
     def laeufe(self) -> list[dict]:

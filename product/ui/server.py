@@ -48,7 +48,7 @@ _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
                      "/api/agent/laeufe"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
-                     "/api/agent/lauf",
+                     "/api/agent/lauf", "/api/agent/freigeben",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
@@ -129,6 +129,12 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_feature_aktiv(Feature.FREIGABE):
                 self._403_feature(Feature.FREIGABE); return
             self._handle_freigabe()
+        elif self.path == "/api/agent/freigeben":
+            if not self._ist_admin():
+                self._403(); return
+            if not self._ist_feature_aktiv(Feature.FREIGABE):
+                self._403_feature(Feature.FREIGABE); return
+            self._handle_agent_freigeben()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
                 self._403(); return
@@ -234,12 +240,45 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            ergebnis = _bridge.freigabe_ausfuehren(limit=limit)
+            # Das Erreichen dieses Endpunkts SETZT den menschlichen Freigabe-Klick
+            # voraus (Modal-Bestätigung) → bestaetigt=True.
+            ergebnis = _bridge.freigabe_ausfuehren(limit=limit, bestaetigt=True)
             self._json({
                 "ok": ergebnis.ok,
                 "meldung": ergebnis.meldung,
                 "gesendet": ergebnis.leads_sauber,
             })
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_agent_freigeben(self):
+        """POST /api/agent/freigeben — Versand eines Agent-Laufs nach Freigabe-Klick.
+
+        Body: {auftrags_id, limit?}. Erreichen dieses Endpunkts = menschliche
+        Bestätigung → runner.freigeben(..., bestaetigt=True). Der Runner prüft
+        zusätzlich, dass der Lauf am harten Tor steht.
+        """
+        import json as _json
+        auftrags_id = ""
+        limit = 20
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+                auftrags_id = str(d.get("auftrags_id", "")).strip()
+                limit = int(d.get("limit", 20))
+        except Exception:
+            pass
+
+        if not auftrags_id:
+            self._json({"ok": False, "meldung": "auftrags_id fehlt."})
+            return
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        try:
+            ergebnis = _agent_runner.freigeben(auftrags_id, limit=limit, bestaetigt=True)
+            self._json(ergebnis)
         except Exception as e:
             self._json({"ok": False, "meldung": str(e)})
 

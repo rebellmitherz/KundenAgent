@@ -9,6 +9,7 @@ Muster: analog telegram_seller/engine.py (Subprozess auf mine.py).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -49,8 +50,20 @@ class EngineBridge:
 
     # --- Interne Hilfsmethoden ---
 
-    def _run(self, args: list[str], timeout: int = 3600) -> tuple[int, str]:
+    def _run(
+        self,
+        args: list[str],
+        timeout: int = 3600,
+        extra_env: Optional[dict] = None,
+    ) -> tuple[int, str]:
         cmd = [sys.executable, "mine.py"] + args
+        # extra_env wird NUR für diesen einen Subprozess gesetzt (Kopie der
+        # Umgebung) — niemals global. So bleibt z. B. die Sende-Bestätigung
+        # OUTREACH_SEND_CONFIRMED streng auf genau den einen Send-Aufruf begrenzt.
+        env = None
+        if extra_env:
+            env = os.environ.copy()
+            env.update(extra_env)
         try:
             proc = subprocess.run(
                 cmd,
@@ -60,6 +73,7 @@ class EngineBridge:
                 timeout=timeout,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
             )
             return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
         except subprocess.TimeoutExpired:
@@ -222,14 +236,35 @@ class EngineBridge:
         except Exception:
             return []
 
-    def freigabe_ausfuehren(self, limit: int = 20) -> EngineBrueckenErgebnis:
-        """V2: Approve + Send — NUR nach explizitem menschlichem Freigabe-Klick aufrufbar.
+    # Engine-eigenes hartes Tor: Ein echter SMTP-Versand feuert nur, wenn diese
+    # Umgebungsvariable gesetzt ist. Ohne sie macht die Engine "kein SMTP, kein
+    # Versand". Wir setzen sie ausschliesslich scoped auf den einen Send-Aufruf
+    # und nur nach ausdruecklicher menschlicher Bestaetigung (bestaetigt=True).
+    _SEND_CONFIRM_ENV = "OUTREACH_SEND_CONFIRMED"
 
-        Sicherheit: Diese Methode wird vom UI-Server erst aufgerufen,
-        wenn der Nutzer im Modal explizit bestaetigt hat.
-        Kein CRM-Push, kein Auto-Reply, nur der kontrollierte Versand.
+    def freigabe_ausfuehren(
+        self, limit: int = 20, *, bestaetigt: bool = False
+    ) -> EngineBrueckenErgebnis:
+        """V2: Approve + Send — der EINZIGE Versand-Pfad. Hartes menschliches Tor.
+
+        Sicherheit (fail-closed):
+          - Ohne bestaetigt=True wird NICHTS approved und NICHTS gesendet.
+          - bestaetigt=True darf nur ein menschlicher Freigabe-Klick setzen
+            (UI-Modal / ausdrueckliche Bestaetigung) — niemals der Agent-Loop.
+          - Die Sende-Bestaetigung an die Engine wird nur scoped auf den Send-
+            Subprozess gesetzt, nie global.
+        Kein CRM-Push, kein Auto-Reply.
         """
-        # Schritt 1: Approve
+        if not bestaetigt:
+            return EngineBrueckenErgebnis(
+                ok=False,
+                meldung=(
+                    "Versand ohne ausdrueckliche Freigabe abgelehnt. "
+                    "Ein Mensch muss bestaetigt=True setzen (Freigabe-Klick)."
+                ),
+            )
+
+        # Schritt 1: Approve (markiert nur approved_for_send — kein SMTP).
         rc1, out1 = self._run(
             ["--outreach", "approve", "--outreach-limit", str(limit)],
             timeout=120,
@@ -237,10 +272,11 @@ class EngineBridge:
         if rc1 != 0:
             return EngineBrueckenErgebnis(ok=False, meldung=f"Approve fehlgeschlagen:\n{out1[-400:]}")
 
-        # Schritt 2: Send
+        # Schritt 2: Send — Sende-Bestaetigung nur fuer genau diesen Aufruf.
         rc2, out2 = self._run(
             ["--outreach", "send", "--outreach-limit", str(limit)],
             timeout=300,
+            extra_env={self._SEND_CONFIRM_ENV: "true"},
         )
         if rc2 != 0:
             return EngineBrueckenErgebnis(ok=False, meldung=f"Send fehlgeschlagen:\n{out2[-400:]}")
