@@ -97,7 +97,12 @@ product/
               keygen.py (NUR Verkäufer, in .gitignore)
   closer/     closer_adapter.py (ClouseAgent als Subprozess, Secret-Filter)
   packaging/  check_install.py (Installations-Check), package.py (ZIP-Build)
-  admin/ orders/ data/   (Doku + Laufzeitdaten)
+  agent/      DAS GEHIRN (Phase A): tools.py (7 Werkzeuge, nur lesen+suchen,
+              Sende-Werkzeuge gesperrt), brain.py (Agent-Loop + ClaudePolitik
+              mit deterministischem Fallback + Guardrails), memory.py
+              (persistenter Lauf-Speicher data/agent/), runner.py (geteilte
+              Anbindung für Telegram + UI). Senden bleibt Mensch-Tor.
+  admin/ orders/ data/   (Doku + Laufzeitdaten; data/agent/ = Agent-Läufe)
 ```
 
 Config-Felder (`product_config.json`, NICHT im Git):
@@ -114,18 +119,22 @@ product/packaging/test_packaging.py   31
 product/agent/test_agent.py           31   (Phase A.1 — Werkzeuge)
 product/agent/test_brain.py           26   (Phase A.2 — Agent-Loop)
 product/agent/test_memory.py          18   (Phase A.3 — Lauf-Speicher)
+product/agent/test_runner.py           8   (Phase A.5 — Runner)
+product/telegram/test_dialog_agent.py  4   (Phase A.5 — Dialog-Anbindung)
                                      ----
-                                     = 196 grün
+                                     = 208 grün
 ```
 
-Was schon LÄUFT (Teile, noch nicht orchestriert):
+Was schon LÄUFT:
+- ✅ **Agent-Loop (Phase A)**: Ziel → denkt (Claude/det.) → sucht + füllt selbst
+  auf → hält am harten Tor. Persistent. In Telegram + UI verdrahtet.
 - ✅ Suche + Target Fill (Lücken erkennen, Varianten vorschlagen)
 - ✅ Mail-Vorschau + Freigabe-Gate (UI)
 - ✅ Bridge zu mine.py
 - ✅ `llm_anthropic.py` (optionaler Claude-Adapter, Key nur aus os.environ)
-- ⬜ Senden nach Freigabe real wiren (Bridge V2 angelegt, nicht fertig)
-- ⬜ Antworten überwachen (b2bbot: `mine.py --outreach process-replies`)
-- ⬜ Follow-up automatisch (b2bbot: `modules/.../followup_engine.py`)
+- ⬜ Senden nach Freigabe real wiren (Bridge V2 angelegt, nicht fertig)  ← Phase B
+- ⬜ Antworten überwachen (b2bbot: `mine.py --outreach process-replies`)  ← Phase B
+- ⬜ Follow-up automatisch (b2bbot: `modules/.../followup_engine.py`)  ← Phase B
 
 ---
 
@@ -227,13 +236,13 @@ Reasoning-Kern (mit deterministischem Fallback, damit Tests ohne Key laufen).
 
 ```
 0–13  Produktschicht + Lizenz + Paket .... ✅ (121 Tests grün, auf GitHub)
-A     Das Gehirn (Agent-Loop) ............ 🔄 in Arbeit
+A     Das Gehirn (Agent-Loop) ............ ✅ FERTIG
   A.1 agent/tools.py + 31 Tests ......... ✅ (commit ce82c9e, Review 456de72)
   A.2 agent/brain.py + 26 Tests ......... ✅ (commit 724f2b1)
   A.3 agent/memory.py + 18 Tests ........ ✅ (commit b87969b)
-  A.4 Tests agent/brain/memory .......... ✅ (75 Agent-Tests, Claude+Engine gemockt)
-  A.5 Telegram + UI Anbindung ........... ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
-B     Loops schließen (Send/Reply/Followup) ⬜
+  A.4 Tests agent/brain/memory/runner ... ✅ (83 Agent-Tests, Claude+Engine gemockt)
+  A.5 agent/runner.py + Telegram + UI ... ✅ (commit f0fbcda, live verifiziert)
+B     Loops schließen (Send/Reply/Followup) ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
 C     Kampagnen-Gedächtnis ............... ⬜
 D     Tore + Push-Meldungen .............. ⬜
 ```
