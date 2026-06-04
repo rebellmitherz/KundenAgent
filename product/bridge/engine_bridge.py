@@ -298,6 +298,65 @@ class EngineBridge:
                 break
         return out
 
+    def kampagne_rohdaten(self, campaign: Optional[str] = None, limit: int = 1000) -> dict:
+        """V2 (read-only): Rohdaten für die Trichter-Ansicht (Phase C).
+
+        Liest Pipeline + reply_queue. Klassifiziert NICHT (das macht die
+        Agent-Schicht), sondern liefert je Lead die stufen-relevanten Felder plus
+        die entry_keys, die geantwortet bzw. einen Termin haben. Kein Subprozess.
+
+        campaign: optional auf eine Kampagne (contacted_in_campaigns) einschränken.
+        """
+        pfad = self._pipeline_pfad()
+        if not pfad.exists():
+            return {"entries": [], "antwort_keys": [], "termin_keys": []}
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+        except Exception:
+            return {"entries": [], "antwort_keys": [], "termin_keys": []}
+
+        # Antworten/Termine aus reply_queue (entry_key-Join)
+        antwort_keys: set[str] = set()
+        termin_keys: set[str] = set()
+        rq = self._reply_queue_pfad()
+        if rq.exists():
+            try:
+                items = json.loads(rq.read_text(encoding="utf-8")).get("items", [])
+                for it in items:
+                    ek = it.get("entry_key", "")
+                    if not ek:
+                        continue
+                    antwort_keys.add(ek)
+                    if it.get("appointment_ready"):
+                        termin_keys.add(ek)
+            except Exception:
+                pass
+
+        entries: list[dict] = []
+        for e in data.get("entries", []):
+            if campaign:
+                if campaign not in (e.get("contacted_in_campaigns") or []):
+                    continue
+            entries.append({
+                "entry_key":       e.get("entry_key", ""),
+                "firma":           e.get("company_name", ""),
+                "ort":             e.get("city", ""),
+                "ansprechpartner": e.get("contact_name", ""),
+                "gesendet":        bool(e.get("sent_message_id")),
+                "bereit": (
+                    (e.get("ready_to_send") or "").strip().lower() == "yes"
+                    and not e.get("do_not_resend")
+                ),
+            })
+            if len(entries) >= limit:
+                break
+
+        return {
+            "entries": entries,
+            "antwort_keys": sorted(antwort_keys),
+            "termin_keys": sorted(termin_keys),
+        }
+
     @staticmethod
     def _parse_zeit(wert: str) -> Optional[datetime]:
         try:

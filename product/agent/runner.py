@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional
 
 from product.agent.brain import Brain, Laufergebnis, baue_brain
+from product.agent.campaign import KampagnenSpeicher
+from product.agent.funnel import funnel_aus_rohdaten, funnel_bericht
 from product.agent.memory import LaufSpeicher
 from product.agent.replies import antworten_bericht, termine
 from product.agent.tools import AgentKontext
@@ -44,6 +46,7 @@ class AgentRunner:
         self._api_key = api_key
         self._max_schritte = max_schritte
         self._speicher = LaufSpeicher(data_dir)
+        self._kampagnen = KampagnenSpeicher(data_dir)
 
     # ----------------------------------------------------------------- Steuern
 
@@ -134,6 +137,37 @@ class AgentRunner:
     def termin_signale(self, limit: int = 30) -> list[dict]:
         """Nur Antworten mit Terminwunsch — das harte Signal (für Phase D)."""
         return termine(self.antworten(limit=limit))
+
+    # ----------------------------------------------------------------- Kampagnen-Trichter (Phase C)
+
+    def funnel(self, campaign: Optional[str] = None) -> dict:
+        """Live-Trichter: je Lead die Stufe (gefunden→bereit→angeschrieben→
+        geantwortet→termin) plus Zählung. Read-only, kein Versand."""
+        if self._bridge is None:
+            return {"gesamt": 0, "stufen": {}, "leads": []}
+        try:
+            roh = self._bridge.kampagne_rohdaten(campaign=campaign)
+        except Exception:
+            return {"gesamt": 0, "stufen": {}, "leads": []}
+        return funnel_aus_rohdaten(roh)
+
+    def funnel_bericht(self, campaign: Optional[str] = None) -> str:
+        """Kundenfähige Trichter-Übersicht inkl. Trend zum letzten Snapshot."""
+        f = self.funnel(campaign)
+        letzter = self._kampagnen.letzter(campaign or "gesamt")
+        vorher = letzter.get("stufen") if letzter else None
+        return funnel_bericht(f, vorher=vorher)
+
+    def funnel_snapshot(self, campaign: Optional[str] = None) -> dict:
+        """Berechnet den Trichter und schreibt ihn in den Kampagnen-Verlauf
+        (persistent über Neustarts). Gibt den Live-Trichter zurück."""
+        f = self.funnel(campaign)
+        self._kampagnen.snapshot_speichern(campaign or "gesamt", f)
+        return f
+
+    def funnel_verlauf(self, campaign: Optional[str] = None) -> list[dict]:
+        """Bisherige Snapshots (Trend) einer Kampagne."""
+        return self._kampagnen.verlauf(campaign or "gesamt")
 
     # ----------------------------------------------------------------- Nachfassen
 

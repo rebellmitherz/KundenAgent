@@ -46,7 +46,7 @@ _ui_token: str = ""
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
 _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
                      "/api/agent/laeufe", "/api/agent/antworten",
-                     "/api/agent/nachfass-faellig"}
+                     "/api/agent/nachfass-faellig", "/api/agent/funnel"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
@@ -105,6 +105,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_agent_antworten()
         elif self.path == "/api/agent/nachfass-faellig":
             self._serve_agent_nachfass_faellig()
+        elif self.path.split("?", 1)[0] == "/api/agent/funnel":
+            self._serve_agent_funnel()
         elif self.path.split("?", 1)[0] == "/api/agent/lauf":
             if not self._ist_admin():
                 self._403(); return
@@ -235,6 +237,24 @@ class _Handler(BaseHTTPRequestHandler):
             "bericht": bericht,
             "verfuegbar": True,
         })
+
+    def _serve_agent_funnel(self):
+        """GET /api/agent/funnel[?campaign=..] — Kampagnen-Trichter (read-only).
+
+        Zeigt je Lead die Stufe + Zählung + kundenfähigen Bericht. Kein Versand.
+        """
+        if not _agent_runner:
+            self._json({"funnel": {"gesamt": 0, "stufen": {}, "leads": []},
+                        "bericht": "", "verfuegbar": False})
+            return
+        qs = parse_qs(urlparse(self.path).query)
+        campaign = (qs.get("campaign", [""])[0]).strip() or None
+        try:
+            funnel = _agent_runner.funnel(campaign=campaign)
+            bericht = _agent_runner.funnel_bericht(campaign=campaign)
+        except Exception:
+            funnel, bericht = {"gesamt": 0, "stufen": {}, "leads": []}, ""
+        self._json({"funnel": funnel, "bericht": bericht, "verfuegbar": True})
 
     def _serve_agent_nachfass_faellig(self):
         """GET /api/agent/nachfass-faellig — wer ist fällig (read-only, kundenfähig)."""
