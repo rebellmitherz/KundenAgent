@@ -26,10 +26,12 @@ sys.path.insert(0, str(_TG_SELLER))
 
 from tg_api import TelegramAPI  # noqa: E402 (aus b2bbot/telegram_seller)
 
+from product.agent.runner import AgentRunner
 from product.bridge.engine_bridge import EngineBridge, EngineError
 from product.operator.confirm import ConfirmGate
 from product.operator.intake import OperatorIntake
 from product.operator.llm_anthropic import build_anthropic_llm
+from product.operator.reporter import Reporter
 from product.telegram.config import laden as config_laden
 from product.telegram.dialog import DialogManager
 
@@ -168,12 +170,24 @@ def main() -> None:
 
     intake = OperatorIntake(llm_fn=llm)
     gate = ConfirmGate()
+
+    # Agent als Aufsatz: führt bestätigte Aufträge eigenständig (suchen + auffüllen,
+    # Stopp am harten Tor). Sendet nie selbst. Ohne Key arbeitet er deterministisch.
+    agent_runner = AgentRunner(
+        bridge=bridge,
+        data_dir=cfg.data_dir,
+        reporter=Reporter(bridge.engine_dir),
+        api_key=cfg.anthropic_api_key or None,
+    )
+    print("[bot] Agent-Modus aktiv — Aufträge werden eigenständig geführt.")
+
     mgr = DialogManager(
         intake=intake,
         gate=gate,
         bridge=bridge,
         orders_dir=cfg.orders_dir,
         send_fn=lambda cid, txt: tg.try_send(cid, txt),
+        agent_runner=agent_runner,
     )
 
     print("[bot] Bereit. Warte auf Nachrichten…")

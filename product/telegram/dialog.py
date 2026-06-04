@@ -26,9 +26,12 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import re
+
+if TYPE_CHECKING:
+    from product.agent.runner import AgentRunner
 
 from product.bridge.engine_bridge import EngineBridge, EngineBrueckenErgebnis
 from product.operator.confirm import ConfirmGate, ConfirmStatus
@@ -77,6 +80,7 @@ class DialogManager:
         bridge: EngineBridge,
         orders_dir: Path,
         send_fn: Optional[SendFn] = None,
+        agent_runner: "Optional[AgentRunner]" = None,
     ):
         self._intake = intake
         self._gate = gate
@@ -85,6 +89,10 @@ class DialogManager:
         self._reporter = Reporter(bridge.engine_dir)
         self._target_fill = TargetFillManager(bridge)
         self._send_fn = send_fn
+        # Optionaler Agent: wenn gesetzt, führt ein bestätigter Auftrag durch den
+        # Agent-Loop (suchen + selbst auffüllen, Stopp am harten Tor) statt der
+        # reinen Einzel-Suche. Ohne ihn bleibt das Verhalten exakt wie bisher.
+        self._agent_runner = agent_runner
         self._zustaende: dict[str, ChatZustand] = {}
         self._lock = threading.Lock()
 
@@ -186,16 +194,23 @@ class DialogManager:
             except Exception:
                 pass
 
-            self._sende(chat_id,
-                f"✅ Auftrag bestätigt. Suche startet im Hintergrund.\n\n"
-                f"🎯 {auftrag.zielgruppe} · {auftrag.region} · {auftrag.lead_anzahl} Leads\n\n"
-                f"Das dauert 15–30 Min. Ich melde mich automatisch. 📲")
+            # Agent-Modus (wenn verdrahtet) oder klassische Einzel-Suche.
+            if self._agent_runner is not None:
+                self._sende(chat_id,
+                    f"✅ Auftrag bestätigt. Ich übernehme die Kampagne und arbeite "
+                    f"selbstständig auf dein Ziel hin.\n\n"
+                    f"🎯 {auftrag.zielgruppe} · {auftrag.region} · {auftrag.lead_anzahl} Leads\n\n"
+                    f"Ich suche, fülle bei Lücken eigenständig nach und melde mich, "
+                    f"sobald deine Entscheidung gefragt ist. 📲")
+                arbeiter = self._agent_im_hintergrund
+            else:
+                self._sende(chat_id,
+                    f"✅ Auftrag bestätigt. Suche startet im Hintergrund.\n\n"
+                    f"🎯 {auftrag.zielgruppe} · {auftrag.region} · {auftrag.lead_anzahl} Leads\n\n"
+                    f"Das dauert 15–30 Min. Ich melde mich automatisch. 📲")
+                arbeiter = self._suche_im_hintergrund
 
-            t = threading.Thread(
-                target=self._suche_im_hintergrund,
-                args=(chat_id, auftrag),
-                daemon=True,
-            )
+            t = threading.Thread(target=arbeiter, args=(chat_id, auftrag), daemon=True)
             t.start()
             return
 
@@ -242,6 +257,27 @@ class DialogManager:
         self._sende(chat_id,
             f"Angepasst. Neuer Auftrag:\n\n{a.als_bestaetigung()}\n\n"
             f"Passt das jetzt? 'Ja, starten' oder weitere Änderung?")
+
+    def _agent_im_hintergrund(self, chat_id: str, auftrag: Auftrag) -> None:
+        """Lässt den Agenten den Auftrag eigenständig führen (suchen + bei Lücken
+        selbst auffüllen), bis ein hartes Tor erreicht ist. Sendet ausschließlich
+        den kundenfähigen Abschlusstext — keine Technik, kein Sende-Pfad.
+        """
+        try:
+            ergebnis = self._agent_runner.starten(auftrag)
+            self._sende(chat_id, ergebnis.kundentext())
+        except Exception as exc:
+            self._sende(chat_id,
+                "⚠️ Ich musste den Lauf abbrechen und melde mich lieber, "
+                "statt etwas Falsches zu tun. Sag mir, wie es weitergehen soll.")
+        finally:
+            z = self._zustand(chat_id)
+            with self._lock:
+                z.modus = DialogModus.IDLE
+                z.auftrag = None
+                # Der Agent füllt selbst auf — kein separater "füll auf"-Folgebefehl.
+                z.letzter_auftrag = None
+                z.letzter_fehlend = 0
 
     def _suche_im_hintergrund(self, chat_id: str, auftrag: Auftrag) -> None:
         try:

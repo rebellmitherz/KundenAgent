@@ -29,10 +29,11 @@ build/
 venv/
 env/
 
-# Laufzeit-Daten (Aufträge, Logs, Leads)
+# Laufzeit-Daten (Aufträge, Logs, Leads, Agent-Läufe)
 product/data/orders/
 product/data/logs/
 product/data/output/
+product/data/agent/
 
 # IDE
 .vscode/

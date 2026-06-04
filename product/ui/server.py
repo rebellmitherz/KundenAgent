@@ -15,11 +15,13 @@ import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 _UI_DIR = Path(__file__).parent
 _PRODUCT_ROOT = _UI_DIR.parent.parent
 sys.path.insert(0, str(_PRODUCT_ROOT))
 
+from product.agent.runner import AgentRunner
 from product.bridge.engine_bridge import EngineBridge, EngineError
 from product.closer.closer_adapter import CloserAdapter
 from product.licensing.features import Feature
@@ -34,6 +36,7 @@ PORT = 8767
 _reporter: Reporter | None = None
 _bridge: EngineBridge | None = None
 _closer: CloserAdapter | None = None
+_agent_runner: AgentRunner | None = None   # Agent-Läufe (Lese-Anbindung)
 _lizenz: LizenzDaten | None = None   # None = Entwicklungsmodus, alle Features
 
 # Admin-Token (aus Config geladen, leer = kein Schutz aktiv)
@@ -41,9 +44,11 @@ _ui_token: str = ""
 
 # Kunden-Endpunkte: nie Token-Pflicht.
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
-_KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads"}
+_KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
+                     "/api/agent/laeufe"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
+                     "/api/agent/lauf",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
@@ -92,6 +97,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_status()
         elif self.path == "/api/leads":
             self._serve_leads()
+        elif self.path == "/api/agent/laeufe":
+            self._serve_agent_laeufe()
+        elif self.path.split("?", 1)[0] == "/api/agent/lauf":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_agent_lauf()
         elif self.path == "/api/vorschau":
             if not self._ist_admin():
                 self._403(); return
@@ -171,6 +182,36 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             mails = []
         self._json({"mails": mails, "anzahl": len(mails)})
+
+    def _serve_agent_laeufe(self):
+        """GET /api/agent/laeufe — Übersicht aller Agent-Läufe (Kampagnen-Fortschritt).
+
+        Kundenfähig: nur Ziel, Status, Funnel-Zahlen, Schrittanzahl — keine Technik.
+        """
+        if not _agent_runner:
+            self._json({"laeufe": [], "verfuegbar": False})
+            return
+        try:
+            laeufe = _agent_runner.laeufe()
+        except Exception:
+            laeufe = []
+        self._json({"laeufe": laeufe, "verfuegbar": True})
+
+    def _serve_agent_lauf(self):
+        """GET /api/agent/lauf?id=... — vollständiger Lauf (Admin, Maschinenraum)."""
+        qs = parse_qs(urlparse(self.path).query)
+        auftrags_id = (qs.get("id", [""])[0]).strip()
+        if not auftrags_id:
+            self._json({"ok": False, "meldung": "Parameter 'id' fehlt."})
+            return
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        lauf = _agent_runner.lauf(auftrags_id)
+        if lauf is None:
+            self._json({"ok": False, "meldung": "Lauf nicht gefunden."})
+            return
+        self._json({"ok": True, "lauf": lauf})
 
     def _handle_freigabe(self):
         """POST /api/freigabe — ERST nach explizitem Nutzer-Modal aufrufbar.
@@ -366,11 +407,15 @@ def _engine_dir_ermitteln() -> Path:
 
 
 def main():
-    global _reporter, _bridge, _ui_token, _closer, _lizenz
+    global _reporter, _bridge, _ui_token, _closer, _lizenz, _agent_runner
 
     # Config + Lizenz laden (optional — leer = Entwicklungsmodus)
+    data_dir = (_PRODUCT_ROOT / "product" / "data").resolve()
+    api_key = ""
     try:
         cfg = config_laden()
+        data_dir = cfg.data_dir
+        api_key = cfg.anthropic_api_key or ""
         if cfg.ui_token:
             _ui_token = cfg.ui_token
             print("[ui] Admin-Token aktiv — Einrichtung/Freigabe geschützt.")
@@ -398,6 +443,17 @@ def main():
     except EngineError as e:
         print(f"[ui] WARNUNG: {e}")
         print("[ui] UI startet ohne Engine — zeigt leere Daten.")
+
+    # Agent-Anbindung (Lesen): zeigt Kampagnen-Läufe. Funktioniert auch ohne
+    # Engine — der Lauf-Speicher braucht nur das data_dir.
+    try:
+        _agent_runner = AgentRunner(
+            bridge=_bridge, data_dir=data_dir,
+            reporter=_reporter, api_key=api_key or None,
+        )
+        print(f"[ui] Agent-Läufe: {Path(data_dir) / 'agent'}")
+    except Exception as e:
+        print(f"[ui] Agent-Anbindung nicht verfügbar: {e}")
 
     server = HTTPServer(("127.0.0.1", PORT), _Handler)
     url = f"http://127.0.0.1:{PORT}"
