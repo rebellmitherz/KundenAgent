@@ -129,8 +129,9 @@ product/bridge/test_followup.py        6   (Phase B.3 — Nachfassen Bridge)
 product/agent/test_nachfassen.py       8   (Phase B.3 — Runner-Nachfassen)
 product/agent/test_funnel.py          21   (Phase C — Trichter + Kampagnen)
 product/bridge/test_kampagne.py        5   (Phase C — Rohdaten read-only)
+product/agent/test_notifier.py        13   (Phase D — Notifier + Watcher)
                                      ----
-                                     = 273 grün
+                                     = 286 grün
 ```
 
 WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
@@ -158,6 +159,8 @@ Was schon LÄUFT:
 - ✅ Nachfassen (B.3) — human-gated followups + read-only Fällig-Vorschau
 - ✅ Kampagnen-Trichter (C) — je Lead Stufe gefunden→bereit→angeschrieben→
   geantwortet→termin, aus Pipeline+reply_queue; persistenter Verlauf/Trend
+- ✅ Push-Meldungen (D) — Watcher meldet Termin-Signale, offene Tore, Nachfassen
+  fällig via Telegram; dedupliziert; kein Auto-Send
 - ⬜ Versand-Abruf-Trigger (process-replies/IMAP) bewusst NICHT gebaut (siehe §4-Notiz)
 
 ---
@@ -271,5 +274,5 @@ B     Loops schließen (Send/Reply/Followup) ✅ FERTIG
   B.2 Antworten lesen + melden (read-only) ✅ (commit 47860a6, +12 Tests)
   B.3 Nachfassen (human-gated followups) . ✅ (commit ffe7743, +14 Tests)
 C     Kampagnen-Gedächtnis ............... ✅ (commit c9198f9, +26 Tests)
-D     Tore + Push-Meldungen .............. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+D     Tore + Push-Meldungen .............. ✅ (commit f09a2b2, +13 Tests)
 ```
