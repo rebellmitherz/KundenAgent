@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import sys
 import traceback
-import types
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -31,17 +30,11 @@ if str(ROOT) not in sys.path:
 from product.agent.tools import (
     SENDE_WERKZEUGE_GESPERRT,
     AgentKontext,
-    WerkzeugErgebnis,
     alle_werkzeuge,
     werkzeug_nach_name,
     werkzeug_namen,
 )
-from product.operator.order_schema import (
-    Auftrag,
-    AuftragsStatus,
-    ErlaubteAktion,
-    Qualitaetskriterien,
-)
+from product.operator.order_schema import Auftrag
 
 
 # ─── Mock-Klassen ────────────────────────────────────────────────────────────

@@ -14,16 +14,11 @@ brain.py prüft jeden Aufruf gegen diese Menge.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from product.operator.expansion_maps import region_erweiterungen, verwandte_branchen
-from product.operator.order_schema import (
-    Auftrag,
-    AuftragsStatus,
-    ErlaubteAktion,
-    Qualitaetskriterien,
-)
+from product.operator.order_schema import Auftrag, AuftragsStatus
 from product.operator.target_fill import TargetFillManager
 
 
@@ -138,7 +133,11 @@ def _bericht_lesen(kontext: AgentKontext, _params: dict) -> WerkzeugErgebnis:
         try:
             bericht = kontext.reporter.strukturiert(kontext.auftrag)
             sendbar = bericht.get("pipeline_sendbar", 0)
-            ziel = bericht.get("ziel", kontext.auftrag.lead_anzahl)
+            # Autoritatives Ziel: der Auftrag selbst. Der Reporter setzt im
+            # strukturierten Output "ziel" = count_requested des letzten Engine-Runs,
+            # berechnet fehlend/ziel_erreicht aber gegen auftrag.lead_anzahl — bei
+            # großem Auftragsziel + kleinem letzten Run wäre die Anzeige sonst inkonsistent.
+            ziel = kontext.auftrag.lead_anzahl
             fehlend = bericht.get("fehlend", max(0, ziel - sendbar))
             ziel_erreicht = bericht.get("ziel_erreicht", False)
             vorschlaege = bericht.get("vorschlaege", [])
@@ -453,11 +452,15 @@ def alle_werkzeuge() -> list[Werkzeug]:
     ]
 
     # Sicherheits-Invariante prüfen — verhindert versehentliche Sende-Werkzeuge
+    # Sicherheits-Invariante als echte Prüfung (NICHT assert — würde unter
+    # `python -O` entfernt und der Schutz fiele lautlos weg). Hartes Tor:
+    # ein Sende-Werkzeug darf niemals in der Werkzeug-Liste landen.
     for w in werkzeuge:
-        assert w.name not in SENDE_WERKZEUGE_GESPERRT, (
-            f"SICHERHEITSFEHLER: '{w.name}' ist in SENDE_WERKZEUGE_GESPERRT — "
-            "darf kein Werkzeug sein."
-        )
+        if w.name in SENDE_WERKZEUGE_GESPERRT:
+            raise RuntimeError(
+                f"SICHERHEITSFEHLER: '{w.name}' ist in SENDE_WERKZEUGE_GESPERRT — "
+                "darf kein Werkzeug sein."
+            )
 
     return werkzeuge
 
