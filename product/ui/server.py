@@ -21,6 +21,7 @@ _PRODUCT_ROOT = _UI_DIR.parent.parent
 sys.path.insert(0, str(_PRODUCT_ROOT))
 
 from product.bridge.engine_bridge import EngineBridge, EngineError
+from product.closer.closer_adapter import CloserAdapter
 from product.operator.reporter import Reporter
 from product.telegram.config import laden as config_laden
 
@@ -30,6 +31,7 @@ _SMTP_PFAD = _PRODUCT_ROOT / "product" / "product_smtp.json"
 PORT = 8767
 _reporter: Reporter | None = None
 _bridge: EngineBridge | None = None
+_closer: CloserAdapter | None = None
 
 # Admin-Token (aus Config geladen, leer = kein Schutz aktiv)
 _ui_token: str = ""
@@ -38,7 +40,9 @@ _ui_token: str = ""
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
 _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
-                     "/api/setup/config", "/api/setup/smtp", "/api/freigabe"}
+                     "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
+                     "/api/closer/status", "/api/closer/log",
+                     "/api/closer/starten", "/api/closer/stoppen"}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -79,6 +83,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._serve_setup_status()
+        elif self.path == "/api/closer/status":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_closer_status()
+        elif self.path == "/api/closer/log":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_closer_log()
         else:
             self._404()
 
@@ -95,6 +107,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._handle_setup_smtp()
+        elif self.path == "/api/closer/starten":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_closer_starten()
+        elif self.path == "/api/closer/stoppen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_closer_stoppen()
         else:
             self._404()
 
@@ -276,6 +296,31 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._json({"ok": True, "meldung": "product_smtp.json gespeichert."})
 
+    def _serve_closer_status(self):
+        if not _closer:
+            self._json({"laeuft": False, "closer_verfuegbar": False,
+                        "meldung": "Closer nicht konfiguriert."})
+            return
+        self._json(_closer.status())
+
+    def _serve_closer_log(self):
+        if not _closer:
+            self._json({"zeilen": []})
+            return
+        self._json({"zeilen": _closer.log_lesen(limit=50)})
+
+    def _handle_closer_starten(self):
+        if not _closer:
+            self._json({"ok": False, "meldung": "Closer nicht konfiguriert."})
+            return
+        self._json(_closer.starten())
+
+    def _handle_closer_stoppen(self):
+        if not _closer:
+            self._json({"ok": False, "meldung": "Closer nicht konfiguriert."})
+            return
+        self._json(_closer.stoppen())
+
     def _json(self, daten: dict | list):
         body = json.dumps(daten, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(200)
@@ -300,7 +345,7 @@ def _engine_dir_ermitteln() -> Path:
 
 
 def main():
-    global _reporter, _bridge, _ui_token
+    global _reporter, _bridge, _ui_token, _closer
 
     # Admin-Token laden (optional — leer = kein Schutz)
     try:
@@ -310,6 +355,14 @@ def main():
             print("[ui] Admin-Token aktiv — Einrichtung/Freigabe geschützt.")
     except Exception:
         pass
+
+    # Closer-Adapter initialisieren (eigenständig, nie im B2B-Fluss)
+    closer_dir = (_PRODUCT_ROOT / "ClouseAgent").resolve()
+    _closer = CloserAdapter(closer_dir)
+    if closer_dir.exists():
+        print(f"[ui] Closer: {closer_dir}")
+    else:
+        print(f"[ui] Closer: nicht gefunden ({closer_dir}) — Tab deaktiviert.")
 
     engine_dir = _engine_dir_ermitteln()
     try:

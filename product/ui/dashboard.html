@@ -919,6 +919,43 @@ html, body {
 }
 .setup-msg.ok  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
 .setup-msg.err { background: rgba(255,71,87,0.1); color: var(--red); border: 1px solid rgba(255,71,87,0.2); }
+
+/* ─── Closer View ────────────────────────────────────────────────────── */
+.closer-section { padding: 24px 0; }
+.closer-h2 { font-size: 11px; letter-spacing: .12em; color: var(--text2);
+             font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
+.closer-status-row { display: flex; align-items: center; gap: 12px;
+                     padding: 12px 16px; background: var(--card);
+                     border: 1px solid var(--border); border-radius: 8px;
+                     margin-bottom: 16px; }
+.closer-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.closer-dot.on  { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.closer-dot.off { background: var(--text3); }
+.closer-dot.na  { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.closer-label { font-size: 13px; color: var(--text1); }
+.closer-pid   { font-size: 11px; color: var(--text3); margin-left: auto; }
+.closer-btns  { display: flex; gap: 12px; margin-bottom: 24px; }
+.closer-btn { padding: 10px 24px; border-radius: 6px; border: 1px solid var(--cyan);
+              background: transparent; color: var(--cyan); font-size: 13px;
+              letter-spacing: .06em; cursor: pointer; transition: background .15s; }
+.closer-btn:hover { background: rgba(0,212,255,0.12); }
+.closer-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.closer-btn.stop { border-color: var(--red); color: var(--red); }
+.closer-btn.stop:hover { background: rgba(255,71,87,0.1); }
+.closer-log { background: #0a0d12; border: 1px solid var(--border); border-radius: 8px;
+              padding: 12px 16px; height: 260px; overflow-y: auto;
+              font-family: monospace; font-size: 12px; color: var(--text2);
+              white-space: pre-wrap; word-break: break-all; }
+.closer-log-empty { color: var(--text3); font-style: italic; }
+.closer-hint { font-size: 12px; color: var(--text3); margin-bottom: 20px;
+               padding: 10px 14px; border: 1px solid var(--border);
+               border-radius: 6px; line-height: 1.6; }
+.closer-msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 6px;
+              font-size: 13px; }
+.closer-msg.ok  { background: var(--green-dim); color: var(--green);
+                  border: 1px solid rgba(0,230,118,0.2); }
+.closer-msg.err { background: rgba(255,71,87,0.1); color: var(--red);
+                  border: 1px solid rgba(255,71,87,0.2); }
 </style>
 </head>
 <body>
@@ -957,6 +994,7 @@ html, body {
     <div class="tab" data-view="leads">Leads</div>
     <div class="tab" data-view="vorschau">Mail-Vorschau</div>
     <div class="tab" data-view="freigabe">Freigabe</div>
+    <div class="tab" data-view="closer" id="tab-closer">Closer</div>
     <div class="tab" data-view="setup" id="tab-setup">Einrichtung</div>
   </div>
 
@@ -1000,6 +1038,11 @@ html, body {
         <!-- befüllt durch JS -->
       </div>
     </div><!-- /view-leads -->
+
+    <!-- Closer View -->
+    <div class="view" id="view-closer">
+      <div id="closerContent"></div>
+    </div>
 
     <!-- Setup View -->
     <div class="view" id="view-setup">
@@ -1636,6 +1679,132 @@ async function setupSpeichernSmtp(e) {
   } finally {
     if (document.getElementById('btnSaveSmtp'))
       document.getElementById('btnSaveSmtp').disabled = false;
+  }
+}
+
+// ─── Closer Tab ───────────────────────────────────────────────────────────
+let _closerStatus = null;
+let _closerLogInterval = null;
+
+document.getElementById('tab-closer').addEventListener('click', () => {
+  closerLaden();
+  _closerLogInterval = setInterval(closerLogAktualisieren, 3000);
+});
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (t.dataset.view !== 'closer' && _closerLogInterval) {
+      clearInterval(_closerLogInterval);
+      _closerLogInterval = null;
+    }
+  });
+});
+
+async function closerLaden() {
+  try {
+    const r = await fetch('/api/closer/status', { headers: _adminHeaders({'Content-Type': undefined}) });
+    _closerStatus = await r.json();
+  } catch(_) {
+    _closerStatus = { laeuft: false, closer_verfuegbar: false, meldung: 'Server nicht erreichbar.' };
+  }
+  renderCloser(_closerStatus);
+  await closerLogAktualisieren();
+}
+
+async function closerLogAktualisieren() {
+  try {
+    const r = await fetch('/api/closer/log', { headers: _adminHeaders({'Content-Type': undefined}) });
+    const d = await r.json();
+    const el = document.getElementById('closerLogBox');
+    if (!el) return;
+    const zeilen = d.zeilen || [];
+    if (zeilen.length === 0) {
+      el.innerHTML = '<span class="closer-log-empty">Noch keine Ausgabe.</span>';
+    } else {
+      el.textContent = zeilen.join('\n');
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch(_) {}
+}
+
+function renderCloser(s) {
+  const el = document.getElementById('closerContent');
+  if (!el) return;
+  const laeuft = s && s.laeuft;
+  const verfuegbar = s && s.closer_verfuegbar;
+  const pid = s && s.pid ? `PID ${s.pid}` : '';
+  const dotKlasse = !verfuegbar ? 'na' : laeuft ? 'on' : 'off';
+  const statusText = !verfuegbar ? 'Nicht installiert' : laeuft ? 'Läuft' : 'Gestoppt';
+
+  el.innerHTML = `
+    <div class="closer-section">
+
+      <div class="closer-hint">
+        ⚡ Live Sales Coach — eigenständiges Modul. Läuft parallel zum Operator,
+        <strong>niemals</strong> im B2B-Telegram-Fluss. Nur über diese UI steuerbar.<br>
+        Benötigt: Mikrofon + OPENAI_API_KEY in der Systemumgebung.
+      </div>
+
+      <div class="closer-h2">Status</div>
+      <div class="closer-status-row">
+        <div class="closer-dot ${dotKlasse}"></div>
+        <span class="closer-label">${esc(statusText)}</span>
+        ${pid ? `<span class="closer-pid">${esc(pid)}</span>` : ''}
+      </div>
+
+      <div id="closerMsg"></div>
+
+      <div class="closer-btns">
+        <button class="closer-btn" id="btnCloserStart"
+                onclick="closerStarten()"
+                ${laeuft || !verfuegbar ? 'disabled' : ''}>
+          ▶ Starten
+        </button>
+        <button class="closer-btn stop" id="btnCloserStop"
+                onclick="closerStoppen()"
+                ${!laeuft ? 'disabled' : ''}>
+          ■ Stoppen
+        </button>
+      </div>
+
+      <div class="closer-h2">Live-Log</div>
+      <div class="closer-log" id="closerLogBox">
+        <span class="closer-log-empty">Noch keine Ausgabe.</span>
+      </div>
+
+    </div>
+  `;
+}
+
+async function closerStarten() {
+  document.getElementById('btnCloserStart').disabled = true;
+  try {
+    const r = await fetch('/api/closer/starten', {
+      method: 'POST', headers: _adminHeaders()
+    });
+    const d = await r.json();
+    const msg = document.getElementById('closerMsg');
+    if (msg) msg.innerHTML = `<div class="closer-msg ${d.ok ? 'ok' : 'err'}">${esc(d.meldung)}</div>`;
+    await closerLaden();
+  } catch(err) {
+    const msg = document.getElementById('closerMsg');
+    if (msg) msg.innerHTML = `<div class="closer-msg err">Fehler: ${esc(String(err))}</div>`;
+  }
+}
+
+async function closerStoppen() {
+  document.getElementById('btnCloserStop').disabled = true;
+  try {
+    const r = await fetch('/api/closer/stoppen', {
+      method: 'POST', headers: _adminHeaders()
+    });
+    const d = await r.json();
+    const msg = document.getElementById('closerMsg');
+    if (msg) msg.innerHTML = `<div class="closer-msg ${d.ok ? 'ok' : 'err'}">${esc(d.meldung)}</div>`;
+    await closerLaden();
+  } catch(err) {
+    const msg = document.getElementById('closerMsg');
+    if (msg) msg.innerHTML = `<div class="closer-msg err">Fehler: ${esc(String(err))}</div>`;
   }
 }
 
