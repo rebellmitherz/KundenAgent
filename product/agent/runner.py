@@ -135,6 +135,55 @@ class AgentRunner:
         """Nur Antworten mit Terminwunsch — das harte Signal (für Phase D)."""
         return termine(self.antworten(limit=limit))
 
+    # ----------------------------------------------------------------- Nachfassen
+
+    def nachfass_faellig(self, limit: int = 50) -> list[dict]:
+        """Read-only: Wer ist fürs Nachfassen fällig? Kein Versand."""
+        if self._bridge is None:
+            return []
+        try:
+            return self._bridge.followups_faellig(limit=limit)
+        except Exception:
+            return []
+
+    def nachfassen(
+        self, auftrags_id: str, limit: int = 20, *, bestaetigt: bool = False
+    ) -> dict:
+        """Nachfass-Versand — NUR nach menschlicher Bestätigung.
+
+        Wie freigeben() dreifach gesichert: bestaetigt=True nötig + der Lauf muss
+        bereits gesendet haben (Status 'gesendet' oder 'nachgefasst') + die Bridge
+        erzwingt die Sende-Bestätigung zusätzlich. Kein Werkzeug des Agent-Loops.
+        """
+        if not bestaetigt:
+            return {"ok": False, "meldung": "Nachfassen ohne Bestätigung abgelehnt."}
+        rec = self._speicher.lesen(auftrags_id)
+        if rec is None:
+            return {"ok": False, "meldung": "Unbekannter Lauf — nichts nachzufassen."}
+        if rec.get("status") not in ("gesendet", "nachgefasst"):
+            return {
+                "ok": False,
+                "meldung": (
+                    f"Lauf ist nicht nachfass-bereit (Status: {rec.get('status')}). "
+                    "Nachfassen ist erst nach dem ersten Versand möglich."
+                ),
+            }
+        if self._bridge is None:
+            return {"ok": False, "meldung": "Engine nicht verbunden."}
+
+        ergebnis = self._bridge.followup_ausfuehren(limit=limit, bestaetigt=True)
+        self._speicher.nachfass_aufzeichnen(
+            auftrags_id,
+            nachgefasst=ergebnis.leads_sauber,
+            meldung=ergebnis.meldung,
+            ok=ergebnis.ok,
+        )
+        return {
+            "ok": ergebnis.ok,
+            "nachgefasst": ergebnis.leads_sauber,
+            "meldung": ergebnis.meldung,
+        }
+
     # ----------------------------------------------------------------- Lesen
 
     def laeufe(self) -> list[dict]:

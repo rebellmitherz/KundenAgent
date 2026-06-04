@@ -45,10 +45,12 @@ _ui_token: str = ""
 # Kunden-Endpunkte: nie Token-Pflicht.
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
 _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
-                     "/api/agent/laeufe", "/api/agent/antworten"}
+                     "/api/agent/laeufe", "/api/agent/antworten",
+                     "/api/agent/nachfass-faellig"}
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
+                     "/api/agent/nachfassen",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
@@ -101,6 +103,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_agent_laeufe()
         elif self.path == "/api/agent/antworten":
             self._serve_agent_antworten()
+        elif self.path == "/api/agent/nachfass-faellig":
+            self._serve_agent_nachfass_faellig()
         elif self.path.split("?", 1)[0] == "/api/agent/lauf":
             if not self._ist_admin():
                 self._403(); return
@@ -137,6 +141,12 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_feature_aktiv(Feature.FREIGABE):
                 self._403_feature(Feature.FREIGABE); return
             self._handle_agent_freigeben()
+        elif self.path == "/api/agent/nachfassen":
+            if not self._ist_admin():
+                self._403(); return
+            if not self._ist_feature_aktiv(Feature.FREIGABE):
+                self._403_feature(Feature.FREIGABE); return
+            self._handle_agent_nachfassen()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
                 self._403(); return
@@ -225,6 +235,47 @@ class _Handler(BaseHTTPRequestHandler):
             "bericht": bericht,
             "verfuegbar": True,
         })
+
+    def _serve_agent_nachfass_faellig(self):
+        """GET /api/agent/nachfass-faellig — wer ist fällig (read-only, kundenfähig)."""
+        if not _agent_runner:
+            self._json({"faellig": [], "anzahl": 0, "verfuegbar": False})
+            return
+        try:
+            faellig = _agent_runner.nachfass_faellig(limit=50)
+        except Exception:
+            faellig = []
+        self._json({"faellig": faellig, "anzahl": len(faellig), "verfuegbar": True})
+
+    def _handle_agent_nachfassen(self):
+        """POST /api/agent/nachfassen — Nachfass-Versand nach Freigabe-Klick.
+
+        Body: {auftrags_id, limit?}. Erreichen = menschliche Bestätigung →
+        runner.nachfassen(..., bestaetigt=True). Der Runner prüft zusätzlich,
+        dass der Lauf bereits gesendet hat.
+        """
+        import json as _json
+        auftrags_id = ""
+        limit = 20
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+                auftrags_id = str(d.get("auftrags_id", "")).strip()
+                limit = int(d.get("limit", 20))
+        except Exception:
+            pass
+        if not auftrags_id:
+            self._json({"ok": False, "meldung": "auftrags_id fehlt."})
+            return
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        try:
+            ergebnis = _agent_runner.nachfassen(auftrags_id, limit=limit, bestaetigt=True)
+            self._json(ergebnis)
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
 
     def _serve_agent_lauf(self):
         """GET /api/agent/lauf?id=... — vollständiger Lauf (Admin, Maschinenraum)."""

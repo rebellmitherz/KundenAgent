@@ -98,6 +98,33 @@ class LaufSpeicher:
         self._schreiben(auftrags_id, record)
         return True
 
+    def nachfass_aufzeichnen(
+        self, auftrags_id: str, nachgefasst: int, meldung: str, ok: bool
+    ) -> bool:
+        """Hält eine menschlich bestätigte Nachfass-Runde am Lauf fest.
+
+        Nur für einen bereits existierenden Lauf. Status wandert bei Erfolg auf
+        'nachgefasst'. False, wenn der Lauf unbekannt ist.
+        """
+        pfad = self._pfad(auftrags_id)
+        if not pfad.exists():
+            return False
+        try:
+            record = json.loads(pfad.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        record.setdefault("nachfass", []).append({
+            "zeitstempel": _jetzt(),
+            "nachgefasst": nachgefasst,
+            "ok": bool(ok),
+            "meldung": meldung,
+        })
+        if ok:
+            record["status"] = "nachgefasst"
+        record["aktualisiert_am"] = _jetzt()
+        self._schreiben(auftrags_id, record)
+        return True
+
     # ----------------------------------------------------------------- Lesen (für UI/Telegram, A.5)
 
     def lesen(self, auftrags_id: str) -> Optional[dict]:

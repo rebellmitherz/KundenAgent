@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -296,6 +297,85 @@ class EngineBridge:
             if len(out) >= limit:
                 break
         return out
+
+    @staticmethod
+    def _parse_zeit(wert: str) -> Optional[datetime]:
+        try:
+            return datetime.fromisoformat((wert or "").strip())
+        except Exception:
+            return None
+
+    def followups_faellig(self, limit: int = 50, jetzt: Optional[datetime] = None) -> list[dict]:
+        """V2 (read-only): Wer ist fürs Nachfassen fällig?
+
+        REIN LESEND. Kriterien: erste Mail ist raus (sent_message_id), KEINE
+        Antwort bisher (reply_status leer/none), nicht do_not_resend, und der
+        Nachfass-Termin (next_followup_at) ist erreicht. So sieht der Mensch
+        vor jeder Freigabe genau, was er nachfassen würde.
+        """
+        pfad = self._pipeline_pfad()
+        if not pfad.exists():
+            return []
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        now = jetzt or datetime.now()
+        out: list[dict] = []
+        for e in data.get("entries", []):
+            if e.get("do_not_resend"):
+                continue
+            if not e.get("sent_message_id"):
+                continue
+            if (e.get("reply_status") or "none").strip().lower() not in ("", "none"):
+                continue
+            nf = e.get("next_followup_at") or ""
+            faellig_am = self._parse_zeit(nf)
+            if faellig_am is None or faellig_am > now:
+                continue
+            out.append({
+                "firma":              e.get("company_name", ""),
+                "ansprechpartner":    e.get("contact_name", ""),
+                "faellig_seit":       nf,
+                "zuletzt_kontaktiert": e.get("last_contacted_at", ""),
+                "stufe":              e.get("outreach_stage", ""),
+                "entry_key":          e.get("entry_key", ""),
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def followup_ausfuehren(
+        self, limit: int = 20, *, bestaetigt: bool = False
+    ) -> EngineBrueckenErgebnis:
+        """V2: Nachfassen (followups) — Versand-Pfad, hartes menschliches Tor.
+
+        Wie freigabe_ausfuehren fail-closed: ohne bestaetigt=True kein Versand.
+        Die Sende-Bestätigung an die Engine wird nur scoped auf diesen einen
+        Aufruf gesetzt. Der Agent-Loop ruft das NIE.
+        """
+        if not bestaetigt:
+            return EngineBrueckenErgebnis(
+                ok=False,
+                meldung=(
+                    "Nachfassen ohne ausdrueckliche Freigabe abgelehnt. "
+                    "Ein Mensch muss bestaetigt=True setzen (Freigabe-Klick)."
+                ),
+            )
+        rc, out = self._run(
+            ["--outreach", "followups", "--outreach-limit", str(limit)],
+            timeout=300,
+            extra_env={self._SEND_CONFIRM_ENV: "true"},
+        )
+        if rc != 0:
+            return EngineBrueckenErgebnis(ok=False, meldung=f"Nachfassen fehlgeschlagen:\n{out[-400:]}")
+        status = self.status_lesen()
+        return EngineBrueckenErgebnis(
+            ok=True,
+            leads_sauber=status.get("sent_total", 0),
+            meldung="Nachfassen ausgefuehrt.",
+            rohdaten=status,
+        )
 
     # Engine-eigenes hartes Tor: Ein echter SMTP-Versand feuert nur, wenn diese
     # Umgebungsvariable gesetzt ist. Ohne sie macht die Engine "kein SMTP, kein
