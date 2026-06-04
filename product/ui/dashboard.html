@@ -1,0 +1,1660 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Hermes Sales Operator</title>
+<style>
+/* ─── Reset & Basis ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #070b14;
+  --bg2:         #0b1120;
+  --card:        #0d1526;
+  --card2:       #111d33;
+  --border:      #1a2a45;
+  --border2:     #243555;
+  --cyan:        #00d4ff;
+  --cyan-dim:    rgba(0, 212, 255, 0.12);
+  --cyan-glow:   rgba(0, 212, 255, 0.35);
+  --green:       #00e676;
+  --green-dim:   rgba(0, 230, 118, 0.12);
+  --amber:       #ffab00;
+  --amber-dim:   rgba(255, 171, 0, 0.12);
+  --red:         #ff4757;
+  --text1:       #dce8f5;
+  --text2:       #7a93b8;
+  --text3:       #435470;
+  --radius:      14px;
+  --radius-sm:   8px;
+  --shadow:      0 4px 32px rgba(0,0,0,0.6);
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text1);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+               system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ─── Layout ─────────────────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px 0;
+  flex-shrink: 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.orb {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #00eaff 0%, #00a8d4 50%, #005f8a 100%);
+  box-shadow: 0 0 18px var(--cyan-glow), 0 0 6px var(--cyan);
+  animation: pulse 3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.orb.running {
+  background: radial-gradient(circle at 40% 35%, #a78bfa 0%, #7c3aed 50%, #3b1a8a 100%);
+  box-shadow: 0 0 22px rgba(139,92,246,0.5), 0 0 8px #a78bfa;
+  animation: spin-glow 1.8s linear infinite;
+}
+
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 14px var(--cyan-glow), 0 0 4px var(--cyan); transform: scale(1); }
+  50%      { box-shadow: 0 0 28px var(--cyan-glow), 0 0 10px var(--cyan); transform: scale(1.06); }
+}
+
+@keyframes spin-glow {
+  0%   { box-shadow: 0 0 22px rgba(139,92,246,0.5), 0 0 8px #a78bfa; transform: scale(1) rotate(0deg); }
+  50%  { box-shadow: 0 0 36px rgba(139,92,246,0.7), 0 0 14px #c4b5fd; transform: scale(1.08) rotate(180deg); }
+  100% { box-shadow: 0 0 22px rgba(139,92,246,0.5), 0 0 8px #a78bfa; transform: scale(1) rotate(360deg); }
+}
+
+.logo-text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+
+.logo-text span { color: var(--cyan); }
+
+.status-dot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: blink 2.4s ease-in-out infinite;
+}
+
+.dot.running { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: blink 0.8s ease-in-out infinite; }
+.dot.idle    { background: var(--text3); box-shadow: none; animation: none; }
+
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+/* ─── Tabs ───────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 18px 28px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tab {
+  padding: 9px 20px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text3);
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: none;
+  transition: color 0.2s, background 0.2s;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.tab:hover { color: var(--text2); }
+
+.tab.active {
+  color: var(--cyan);
+  background: var(--card);
+  border-color: var(--border);
+  border-bottom-color: var(--card);
+  margin-bottom: -1px;
+}
+
+/* ─── Content ────────────────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
+.content::-webkit-scrollbar { width: 5px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.view { display: none; }
+.view.active { display: block; }
+
+/* ─── Status View ────────────────────────────────────────────────────── */
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 700px) { .status-grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+  background: radial-gradient(ellipse at 10% 0%, var(--cyan-dim) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.card-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 14px;
+}
+
+/* Auftrag-Card (volle Breite) */
+.card-full { grid-column: 1 / -1; }
+
+.auftrag-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.auftrag-main {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text1);
+}
+
+.auftrag-sub {
+  font-size: 15px;
+  color: var(--text2);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tag-cyan  { background: var(--cyan-dim);  color: var(--cyan);  border: 1px solid rgba(0,212,255,0.2); }
+.tag-green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.tag-amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(255,171,0,0.2); }
+
+.state-tag { margin-top: 10px; }
+
+/* Progress Ring */
+.progress-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.ring-container {
+  position: relative;
+  width: 130px;
+  height: 130px;
+}
+
+.ring-container svg {
+  transform: rotate(-90deg);
+}
+
+.ring-bg { stroke: var(--border2); }
+.ring-fg {
+  stroke: var(--cyan);
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px var(--cyan));
+  transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.ring-number {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text1);
+  line-height: 1;
+}
+
+.ring-sub {
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+}
+
+.ring-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cyan);
+  margin-top: 10px;
+}
+
+/* Stats-Grid */
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.stat {
+  padding: 14px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.stat-val {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text1);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-val.cyan  { color: var(--cyan); }
+.stat-val.green { color: var(--green); }
+.stat-val.amber { color: var(--amber); }
+
+.stat-key {
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+}
+
+/* Vorschläge */
+.vorschlaege { list-style: none; }
+
+.vorschlag {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text2);
+  align-items: flex-start;
+}
+
+.vorschlag:last-child { margin-bottom: 0; }
+
+.vorschlag-icon {
+  color: var(--amber);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Leer-Zustand */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 14px;
+  color: var(--text3);
+}
+
+.empty-icon { font-size: 40px; opacity: 0.4; }
+.empty-text { font-size: 14px; text-align: center; line-height: 1.6; }
+
+/* ─── Leads View ──────────────────────────────────────────────────────── */
+.leads-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.leads-count {
+  font-size: 13px;
+  color: var(--text3);
+}
+
+.leads-count span { color: var(--cyan); font-weight: 600; }
+
+.search-input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  color: var(--text1);
+  font-size: 13px;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.2s;
+}
+
+.search-input::placeholder { color: var(--text3); }
+.search-input:focus { border-color: var(--cyan); }
+
+.leads-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.lead-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  transition: border-color 0.2s, transform 0.15s;
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+}
+
+.lead-card:hover {
+  border-color: var(--border2);
+  transform: translateY(-2px);
+}
+
+.lead-card::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.lead-card:hover::after { opacity: 0.4; }
+
+.lead-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.lead-firma {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text1);
+  line-height: 1.3;
+}
+
+.score-badge {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.score-high { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.25); }
+.score-mid  { background: var(--cyan-dim);  color: var(--cyan);  border: 1px solid rgba(0,212,255,0.25); }
+.score-low  { background: var(--border);    color: var(--text3); border: 1px solid var(--border2); }
+
+.lead-detail {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 5px;
+}
+
+.lead-detail:last-child { margin-bottom: 0; }
+
+.lead-icon { color: var(--text3); font-size: 11px; width: 14px; text-align: center; }
+
+.lead-phone { color: var(--green); }
+
+.lead-branche {
+  margin-top: 10px;
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 2px 8px;
+}
+
+/* ─── Footer / Refresh ───────────────────────────────────────────────── */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 28px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.footer-info { font-size: 11px; color: var(--text3); }
+.footer-info span { color: var(--text2); }
+
+.refresh-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text3);
+  font-size: 11px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+  letter-spacing: 0.06em;
+}
+
+.refresh-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* ─── Mail-Vorschau ──────────────────────────────────────────────────── */
+.mail-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.mail-card:hover { border-color: var(--border2); }
+
+.mail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mail-header:hover { background: rgba(255,255,255,0.02); }
+
+.mail-meta { flex: 1; min-width: 0; }
+
+.mail-firma {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text1);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mail-betreff {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mail-email {
+  font-size: 11px;
+  color: var(--cyan);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.mail-chevron {
+  color: var(--text3);
+  font-size: 12px;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.mail-card.open .mail-chevron { transform: rotate(180deg); }
+
+.mail-body {
+  display: none;
+  padding: 0 18px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.mail-card.open .mail-body { display: block; }
+
+.mail-body-text {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-top: 14px;
+  font-family: inherit;
+}
+
+/* ─── Freigabe View ──────────────────────────────────────────────────── */
+.freigabe-wrap {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 10px 0;
+}
+
+.freigabe-summary {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+}
+
+.freigabe-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text1);
+  margin-bottom: 18px;
+}
+
+.freigabe-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.freigabe-row:last-child { border-bottom: none; }
+.freigabe-key { color: var(--text3); }
+.freigabe-val { color: var(--text1); font-weight: 600; }
+.freigabe-val.green { color: var(--green); }
+.freigabe-val.amber { color: var(--amber); }
+
+.freigabe-hinweis {
+  background: var(--amber-dim);
+  border: 1px solid rgba(255,171,0,0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--amber);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.freigabe-btn {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #005f8a 0%, #00a8d4 100%);
+  border: none;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 4px 20px rgba(0,212,255,0.25);
+}
+
+.freigabe-btn:hover  { opacity: 0.9; transform: translateY(-1px); }
+.freigabe-btn:active { transform: translateY(0); }
+.freigabe-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ─── Modal ──────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.modal-overlay.visible { opacity: 1; pointer-events: auto; }
+
+.modal {
+  background: var(--card2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  width: min(420px, 90vw);
+  box-shadow: var(--shadow);
+  transform: scale(0.95);
+  transition: transform 0.25s;
+}
+
+.modal-overlay.visible .modal { transform: scale(1); }
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text1);
+  margin-bottom: 10px;
+}
+
+.modal-text {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.modal-text strong { color: var(--text1); }
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-secondary:hover { border-color: var(--text2); color: var(--text1); }
+
+.btn-primary {
+  padding: 10px 22px;
+  background: var(--cyan);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #000;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-primary:hover { opacity: 0.85; }
+
+.freigabe-result {
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  margin-top: 16px;
+  display: none;
+}
+
+.freigabe-result.ok  { background: var(--green-dim); border: 1px solid rgba(0,230,118,0.3); color: var(--green); }
+.freigabe-result.err { background: rgba(255,71,87,0.1); border: 1px solid rgba(255,71,87,0.3); color: var(--red); }
+
+/* ─── Loading overlay ────────────────────────────────────────────────── */
+.loading {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: opacity 0.4s;
+}
+
+.loading.hidden { opacity: 0; pointer-events: none; }
+
+.loader {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  border-top-color: var(--cyan);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Scrollbar global ───────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+
+/* ─── Setup View ─────────────────────────────────────────────────────── */
+.setup-section {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.setup-hint {
+  background: var(--amber-dim);
+  border: 1px solid rgba(255,171,0,0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--amber);
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.setup-ok-banner {
+  background: var(--green-dim);
+  border: 1px solid rgba(0,230,118,0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--green);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup-h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text2);
+  margin-bottom: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-form-row {
+  margin-bottom: 16px;
+}
+
+.setup-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 6px;
+}
+
+.setup-input {
+  width: 100%;
+  background: var(--card2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  color: var(--text1);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.setup-input:focus { border-color: var(--cyan); }
+.setup-input::placeholder { color: var(--text3); }
+
+.setup-input-hint {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 4px;
+}
+
+.setup-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--cyan-dim);
+  border: 1px solid rgba(0,212,255,0.3);
+  border-radius: var(--radius-sm);
+  color: var(--cyan);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  margin-top: 8px;
+  font-family: inherit;
+}
+
+.setup-btn:hover { background: rgba(0,212,255,0.2); border-color: var(--cyan); }
+.setup-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.setup-divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+.setup-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+  padding: 8px 0;
+}
+
+.setup-status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.setup-status-dot.ok  { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.setup-status-dot.err { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+
+.setup-msg {
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+}
+.setup-msg.ok  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.setup-msg.err { background: rgba(255,71,87,0.1); color: var(--red); border: 1px solid rgba(255,71,87,0.2); }
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading"><div class="loader"></div></div>
+
+<!-- Freigabe-Bestätigungs-Modal -->
+<div class="modal-overlay" id="freigabeModal">
+  <div class="modal">
+    <div class="modal-title">Freigabe bestätigen</div>
+    <div class="modal-text" id="modalText"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="schliesseModal()">Abbrechen</button>
+      <button class="btn-primary" id="modalBestaetigen" onclick="freigabeBestaetigen()">Jetzt senden</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <div class="orb" id="orb"></div>
+      <div class="logo-text"><span>Hermes</span> Sales Operator</div>
+    </div>
+    <div class="status-dot">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusLabel">Verbinde…</span>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-view="status">Status</div>
+    <div class="tab" data-view="leads">Leads</div>
+    <div class="tab" data-view="vorschau">Mail-Vorschau</div>
+    <div class="tab" data-view="freigabe">Freigabe</div>
+    <div class="tab" data-view="setup" id="tab-setup">Einrichtung</div>
+  </div>
+
+  <!-- Status View -->
+  <div class="content">
+    <div class="view active" id="view-status">
+
+      <div class="status-grid" id="statusContent">
+        <!-- befüllt durch JS -->
+      </div>
+
+    </div><!-- /view-status -->
+
+    <!-- Mail-Vorschau View -->
+    <div class="view" id="view-vorschau">
+      <div class="leads-toolbar">
+        <div class="leads-count">
+          <span id="mailCount">0</span> Mails zur Vorschau
+        </div>
+        <input class="search-input" type="text" id="mailSearchInput"
+               placeholder="Suchen…" oninput="filterMails(this.value)">
+      </div>
+      <div id="mailGrid"></div>
+    </div>
+
+    <!-- Freigabe View -->
+    <div class="view" id="view-freigabe">
+      <div id="freigabeContent"></div>
+    </div>
+
+    <!-- Leads View -->
+    <div class="view" id="view-leads">
+      <div class="leads-toolbar">
+        <div class="leads-count">
+          <span id="leadsCount">0</span> Leads gefunden
+        </div>
+        <input class="search-input" type="text" id="searchInput"
+               placeholder="Suchen…" oninput="filterLeads(this.value)">
+      </div>
+      <div class="leads-grid" id="leadsGrid">
+        <!-- befüllt durch JS -->
+      </div>
+    </div><!-- /view-leads -->
+
+    <!-- Setup View -->
+    <div class="view" id="view-setup">
+      <div id="setupContent"></div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-info">Zuletzt aktualisiert: <span id="lastUpdate">—</span></div>
+    <button class="refresh-btn" onclick="laden()">↻ Aktualisieren</button>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────
+let _daten = null;
+let _alleLeads = [];
+let _alleMails = [];
+let _autoRefresh = null;
+let _freigabeLimitAktuell = 20;
+
+// ─── Tab-Switching ────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('view-' + t.dataset.view).classList.add('active');
+  });
+});
+
+// ─── Daten laden ─────────────────────────────────────────────────────────
+async function laden() {
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) throw new Error(r.status);
+    _daten = await r.json();
+    renderStatus(_daten);
+    renderLeadsFromStatus(_daten);
+    renderFreigabe(_daten);
+    setOnline();
+  } catch (e) {
+    setOffline();
+  }
+
+  try {
+    const r2 = await fetch('/api/leads');
+    if (r2.ok) {
+      const d = await r2.json();
+      if (d.leads && d.leads.length > 0) {
+        _alleLeads = d.leads;
+        renderLeads(_alleLeads);
+        document.getElementById('leadsCount').textContent = _alleLeads.length;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const r3 = await fetch('/api/vorschau', { headers: _adminHeaders({'Content-Type': undefined}) });
+    if (r3.ok) {
+      const d = await r3.json();
+      _alleMails = d.mails || [];
+      renderMails(_alleMails);
+      document.getElementById('mailCount').textContent = _alleMails.length;
+    }
+  } catch (_) {}
+
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
+  document.getElementById('loading').classList.add('hidden');
+}
+
+// ─── Status-View rendern ──────────────────────────────────────────────────
+function renderStatus(d) {
+  if (!d || d.fehler) {
+    document.getElementById('statusContent').innerHTML = emptyState(
+      '📡', 'Keine Daten verfügbar', 'Noch kein Auftrag ausgeführt oder Engine nicht erreichbar.'
+    );
+    return;
+  }
+
+  const running = false; // V1: aus Datei lesen, kein Live-State
+  const ziel = d.auftrag && d.auftrag.lead_anzahl > 0 ? d.auftrag.lead_anzahl : (d.ziel || 0);
+  const sauber = d.sauber_telefon || 0;
+  const pct = ziel > 0 ? Math.round((sauber / ziel) * 100) : 0;
+  const circ = 2 * Math.PI * 52;
+  const offset = circ - (pct / 100) * circ;
+
+  const auftragName = (d.auftrag && d.auftrag.zielgruppe)
+    ? `${d.auftrag.zielgruppe} · ${d.auftrag.region}`
+    : 'Letzter Run';
+
+  const tagClass = d.ziel_erreicht ? 'tag-green' : (d.fehlend > 0 ? 'tag-amber' : 'tag-cyan');
+  const tagText  = d.ziel_erreicht ? 'Ziel erreicht' : (running ? 'Suche läuft' : 'Letzte Ergebnisse');
+
+  const vorschlaege = (d.vorschlaege || []).map(v => `
+    <li class="vorschlag">
+      <span class="vorschlag-icon">💡</span>
+      <span>${esc(v)}</span>
+    </li>`).join('');
+
+  document.getElementById('statusContent').innerHTML = `
+
+    <!-- Auftrag -->
+    <div class="card card-full">
+      <div class="card-label">Auftrag</div>
+      <div class="auftrag-row">
+        <div class="auftrag-main">${esc(auftragName)}</div>
+        ${d.auftrag && d.auftrag.angebot ? `<div class="auftrag-sub">· ${esc(d.auftrag.angebot)}</div>` : ''}
+      </div>
+      <div class="state-tag">
+        <span class="tag ${tagClass}">${tagText}</span>
+      </div>
+    </div>
+
+    <!-- Progress Ring -->
+    <div class="card">
+      <div class="card-label">Fortschritt</div>
+      <div class="progress-wrap">
+        <div class="ring-container">
+          <svg width="130" height="130" viewBox="0 0 130 130">
+            <circle class="ring-bg" cx="65" cy="65" r="52"
+              fill="none" stroke-width="7"/>
+            <circle class="ring-fg" cx="65" cy="65" r="52"
+              fill="none" stroke-width="7"
+              stroke-dasharray="${circ}"
+              stroke-dashoffset="${offset}"
+              id="ringFg"/>
+          </svg>
+          <div class="ring-label">
+            <div class="ring-number">${sauber}</div>
+            <div class="ring-sub">VON ${ziel}</div>
+          </div>
+        </div>
+        <div class="ring-pct">${pct}%</div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+      <div class="card-label">Kennzahlen</div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-val green">${d.sauber_telefon || 0}</div>
+          <div class="stat-key">MIT TELEFON</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val cyan">${d.mit_ansprechpartner || 0}</div>
+          <div class="stat-key">ANSPRECHPARTNER</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val">${d.pipeline_sendbar || 0}</div>
+          <div class="stat-key">SENDBAR</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val amber">${d.avg_score || '—'}</div>
+          <div class="stat-key">Ø SCORE</div>
+        </div>
+      </div>
+    </div>
+
+    ${vorschlaege ? `
+    <!-- Vorschläge -->
+    <div class="card card-full">
+      <div class="card-label">Vorschläge</div>
+      <ul class="vorschlaege">${vorschlaege}</ul>
+    </div>` : ''}
+  `;
+
+  // Orb-Zustand
+  const orb = document.getElementById('orb');
+  orb.className = 'orb' + (running ? ' running' : '');
+}
+
+// ─── Leads rendern ────────────────────────────────────────────────────────
+function renderLeadsFromStatus(d) {
+  if (!d || !d.top_leads || d.top_leads.length === 0) return;
+  if (_alleLeads.length === 0) {
+    _alleLeads = d.top_leads;
+    renderLeads(_alleLeads);
+    document.getElementById('leadsCount').textContent = _alleLeads.length;
+  }
+}
+
+function renderLeads(leads) {
+  const grid = document.getElementById('leadsGrid');
+  if (!leads || leads.length === 0) {
+    grid.innerHTML = emptyState('📋', 'Keine Leads', 'Starte eine Suche über Telegram.');
+    return;
+  }
+
+  grid.innerHTML = leads.map(l => {
+    const s = l.score || 0;
+    const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+    const scoreLabel = s > 0 ? s : '—';
+
+    return `
+    <div class="lead-card">
+      <div class="lead-header">
+        <div class="lead-firma">${esc(l.firma || '—')}</div>
+        <div class="score-badge ${scoreClass}">${scoreLabel}</div>
+      </div>
+
+      ${l.ort ? `<div class="lead-detail">
+        <span class="lead-icon">📍</span>
+        <span>${esc(l.ort)}</span>
+      </div>` : ''}
+
+      ${l.telefon ? `<div class="lead-detail">
+        <span class="lead-icon">📞</span>
+        <span class="lead-phone">${esc(l.telefon)}</span>
+      </div>` : ''}
+
+      ${l.ansprechpartner ? `<div class="lead-detail">
+        <span class="lead-icon">👤</span>
+        <span>${esc(l.ansprechpartner)}</span>
+      </div>` : ''}
+
+      ${l.website ? `<div class="lead-detail">
+        <span class="lead-icon">🌐</span>
+        <span style="color:var(--text3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">
+          ${esc(l.website.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span>
+      </div>` : ''}
+
+      ${l.branche ? `<div class="lead-branche">${esc(l.branche)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ─── Mail-Vorschau rendern ────────────────────────────────────────────────
+function renderMails(mails) {
+  const grid = document.getElementById('mailGrid');
+  if (!mails || mails.length === 0) {
+    grid.innerHTML = emptyState('✉️', 'Keine Mails zur Vorschau',
+      'Starte zuerst eine Suche. Mails werden automatisch generiert.');
+    return;
+  }
+  grid.innerHTML = mails.map((m, i) => `
+    <div class="mail-card" id="mail-${i}">
+      <div class="mail-header" onclick="toggleMail(${i})">
+        <div class="mail-meta">
+          <div class="mail-firma">${esc(m.firma)}</div>
+          <div class="mail-betreff">${esc(m.betreff || '(kein Betreff)')}</div>
+        </div>
+        <div class="mail-email">${esc(m.email)}</div>
+        <div class="mail-chevron">▼</div>
+      </div>
+      <div class="mail-body">
+        <pre class="mail-body-text">${esc(m.inhalt)}</pre>
+      </div>
+    </div>`).join('');
+}
+
+function toggleMail(i) {
+  document.getElementById('mail-' + i).classList.toggle('open');
+}
+
+function filterMails(q) {
+  if (!q.trim()) { renderMails(_alleMails); return; }
+  const low = q.toLowerCase();
+  renderMails(_alleMails.filter(m =>
+    (m.firma  || '').toLowerCase().includes(low) ||
+    (m.email  || '').toLowerCase().includes(low) ||
+    (m.betreff|| '').toLowerCase().includes(low)
+  ));
+}
+
+// ─── Freigabe-View rendern ────────────────────────────────────────────────
+function renderFreigabe(d) {
+  const el = document.getElementById('freigabeContent');
+  if (!d) { el.innerHTML = emptyState('🔒', 'Keine Daten', ''); return; }
+
+  const sendbar  = d.pipeline_sendbar || 0;
+  const approved = (d.rohdaten && d.rohdaten.approved) || 0;
+  const gesendet = (d.rohdaten && d.rohdaten.sent_total) || 0;
+  const limit    = Math.min(sendbar, 20);
+  _freigabeLimitAktuell = limit;
+
+  el.innerHTML = `
+    <div class="freigabe-wrap">
+      <div class="freigabe-summary">
+        <div class="freigabe-title">Freigabe & Versand</div>
+
+        <div class="freigabe-row">
+          <span class="freigabe-key">Sendbar (Pipeline)</span>
+          <span class="freigabe-val green">${sendbar}</span>
+        </div>
+        <div class="freigabe-row">
+          <span class="freigabe-key">Bereits gesendet</span>
+          <span class="freigabe-val">${gesendet}</span>
+        </div>
+        <div class="freigabe-row">
+          <span class="freigabe-key">Jetzt freizugeben</span>
+          <span class="freigabe-val amber">${limit}</span>
+        </div>
+      </div>
+
+      ${sendbar > 0 ? `
+      <div class="freigabe-hinweis">
+        ⚠️ Nach Klick auf „Freigabe erteilen" werden <strong>${limit} Mails</strong>
+        tatsächlich versendet. Dieser Schritt ist nicht rückgängig zu machen.<br><br>
+        Prüfe vorher die Mail-Vorschau im Tab links.
+      </div>
+
+      <button class="freigabe-btn" id="freigabeBtn"
+              onclick="zeigFreigabeModal(${limit})">
+        ✉️ Freigabe erteilen — ${limit} Mails senden
+      </button>` : `
+      <div class="freigabe-hinweis" style="border-color:rgba(0,212,255,0.2);background:var(--cyan-dim);color:var(--cyan)">
+        ℹ️ Keine Mails bereit zum Senden. Starte zuerst eine Suche über Telegram.
+      </div>`}
+
+      <div class="freigabe-result" id="freigabeResult"></div>
+    </div>`;
+}
+
+// ─── Modal ────────────────────────────────────────────────────────────────
+function zeigFreigabeModal(limit) {
+  document.getElementById('modalText').innerHTML =
+    `Es werden jetzt <strong>${limit} Mails</strong> aus der Pipeline versendet.<br><br>
+     Alle Mails wurden vorher durch die Engine geprüft und personalisiert.<br>
+     Dieser Schritt kann nicht rückgängig gemacht werden.`;
+  document.getElementById('freigabeModal').classList.add('visible');
+}
+
+function schliesseModal() {
+  document.getElementById('freigabeModal').classList.remove('visible');
+}
+
+async function freigabeBestaetigen() {
+  schliesseModal();
+  const btn = document.getElementById('freigabeBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Wird gesendet…'; }
+
+  try {
+    const r = await fetch('/api/freigabe', {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify({ limit: _freigabeLimitAktuell }),
+    });
+    const d = await r.json();
+    const el = document.getElementById('freigabeResult');
+    if (d.ok) {
+      el.className = 'freigabe-result ok';
+      el.textContent = `✅ Erfolgreich! ${d.meldung}`;
+    } else {
+      el.className = 'freigabe-result err';
+      el.textContent = `⚠️ ${d.meldung}`;
+      if (btn) { btn.disabled = false; btn.textContent = `✉️ Erneut versuchen`; }
+    }
+    el.style.display = 'block';
+    laden(); // Daten neu laden
+  } catch (e) {
+    const el = document.getElementById('freigabeResult');
+    el.className = 'freigabe-result err';
+    el.textContent = `Verbindungsfehler: ${e}`;
+    el.style.display = 'block';
+  }
+}
+
+// Klick außerhalb des Modals schließt es
+document.getElementById('freigabeModal').addEventListener('click', e => {
+  if (e.target.id === 'freigabeModal') schliesseModal();
+});
+
+function filterLeads(q) {
+  if (!q.trim()) { renderLeads(_alleLeads); return; }
+  const low = q.toLowerCase();
+  const gefiltert = _alleLeads.filter(l =>
+    (l.firma   || '').toLowerCase().includes(low) ||
+    (l.ort     || '').toLowerCase().includes(low) ||
+    (l.branche || '').toLowerCase().includes(low) ||
+    (l.ansprechpartner || '').toLowerCase().includes(low)
+  );
+  renderLeads(gefiltert);
+}
+
+// ─── Online / Offline ─────────────────────────────────────────────────────
+function setOnline() {
+  document.getElementById('statusDot').className   = 'dot';
+  document.getElementById('statusLabel').textContent = 'Aktiv';
+}
+
+function setOffline() {
+  document.getElementById('statusDot').className   = 'dot idle';
+  document.getElementById('statusLabel').textContent = 'Keine Verbindung';
+  document.getElementById('loading').classList.add('hidden');
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function emptyState(icon, title, sub) {
+  return `<div class="empty" style="grid-column:1/-1">
+    <div class="empty-icon">${icon}</div>
+    <div class="empty-text"><strong>${esc(title)}</strong><br>${esc(sub)}</div>
+  </div>`;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+laden();
+_autoRefresh = setInterval(laden, 15000);  // alle 15 Sek aktualisieren
+
+// ─── Admin-Token ──────────────────────────────────────────────────────────
+// Token aus localStorage lesen/schreiben — nie ans Backend geloggt.
+function _adminToken() { return localStorage.getItem('hso_admin_token') || ''; }
+function _adminHeaders(extra) {
+  const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
+  const t = _adminToken();
+  if (t) h['X-Access-Token'] = t;
+  return h;
+}
+
+// ─── Setup Tab ────────────────────────────────────────────────────────────
+let _setupStatus = null;
+
+document.getElementById('tab-setup').addEventListener('click', () => {
+  setupLaden();
+});
+
+async function setupLaden() {
+  try {
+    const r = await fetch('/api/setup/status', { headers: _adminHeaders({'Content-Type': undefined}) });
+    _setupStatus = await r.json();
+  } catch(e) {
+    _setupStatus = { config_vorhanden: false, smtp_vorhanden: false, engine_gefunden: false };
+  }
+  renderSetup(_setupStatus);
+}
+
+function renderSetup(s) {
+  const el = document.getElementById('setupContent');
+  if (!el) return;
+
+  const configOk = s && s.config_vorhanden;
+  const smtpOk   = s && s.smtp_vorhanden;
+  const engineOk = s && s.engine_gefunden;
+
+  const currentToken = _adminToken();
+  el.innerHTML = `
+    <div class="setup-section">
+
+      <div class="setup-hint">
+        ⚠ Diese Seite ist nur über <strong>127.0.0.1</strong> erreichbar.<br>
+        Eingaben werden direkt lokal gespeichert — kein Telegram-Chat, kein Netzwerk.
+      </div>
+
+      <!-- Admin-Token -->
+      <div class="setup-h2" style="margin-top:0">Admin-Token</div>
+      <div class="setup-form-row">
+        <label class="setup-label">UI-Zugriffstoken</label>
+        <input type="password" class="setup-input" id="ui_token_input"
+               placeholder="Leer = kein Schutz aktiv"
+               value="${currentToken ? '••••gesetzt' : ''}"
+               autocomplete="off">
+        <div class="setup-input-hint">
+          Gesetzt in <code>product_config.json</code> (ui_token).
+          Einmalig hier eingeben → wird im Browser gespeichert.
+        </div>
+      </div>
+      <button type="button" class="setup-btn" onclick="adminTokenSpeichern()"
+              style="margin-bottom:0">Token übernehmen</button>
+      <div id="tokenMsg" style="margin-top:8px"></div>
+
+      <hr class="setup-divider">
+
+      <!-- Aktueller Status -->
+      <div class="setup-h2">Aktueller Status</div>
+      <div class="setup-status-row">
+        <div class="setup-status-dot ${configOk ? 'ok' : 'err'}"></div>
+        <span>product_config.json: ${configOk ? 'vorhanden' : 'fehlt'}</span>
+      </div>
+      <div class="setup-status-row">
+        <div class="setup-status-dot ${engineOk ? 'ok' : 'err'}"></div>
+        <span>b2bbot-Engine: ${engineOk ? 'gefunden' : 'nicht gefunden'}</span>
+      </div>
+      <div class="setup-status-row">
+        <div class="setup-status-dot ${smtpOk ? 'ok' : 'err'}"></div>
+        <span>SMTP-Config: ${smtpOk ? 'vorhanden' : 'nicht eingerichtet (optional für V2)'}</span>
+      </div>
+
+      ${configOk && engineOk ? `
+        <div class="setup-ok-banner" style="margin-top:16px">
+          ✓ Operator ist eingerichtet und einsatzbereit.
+        </div>
+      ` : ''}
+
+      <hr class="setup-divider">
+
+      <!-- Operator-Config -->
+      <div class="setup-h2">Operator-Konfiguration</div>
+      <div id="setupConfigMsg"></div>
+      <form id="formConfig" onsubmit="setupSpeichernConfig(event)">
+        <div class="setup-form-row">
+          <label class="setup-label">Telegram Bot-Token</label>
+          <input type="password" class="setup-input" id="cfg_token"
+                 placeholder="1234567890:ABC-..." autocomplete="off" required>
+          <div class="setup-input-hint">Von @BotFather erhalten → /newbot</div>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Eigene Telegram Chat-ID</label>
+          <input type="text" class="setup-input" id="cfg_owner"
+                 placeholder="123456789" autocomplete="off" required>
+          <div class="setup-input-hint">Tipp: @userinfobot anschreiben</div>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Engine-Pfad (relativ zu product/)</label>
+          <input type="text" class="setup-input" id="cfg_engine" value="../b2bbot">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Datenpfad (relativ zu product/)</label>
+          <input type="text" class="setup-input" id="cfg_data" value="data">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Anthropic API Key (optional)</label>
+          <input type="password" class="setup-input" id="cfg_apikey"
+                 placeholder="sk-ant-… (leer = KI nicht aktiv)" autocomplete="off">
+        </div>
+        <button type="submit" class="setup-btn" id="btnSaveConfig">
+          ${configOk ? '✓ Config aktualisieren' : '→ Config speichern'}
+        </button>
+      </form>
+
+      <hr class="setup-divider">
+
+      <!-- SMTP -->
+      <div class="setup-h2">SMTP-Konfiguration <span style="font-size:11px;color:var(--text3);font-weight:400">(V2 — optional)</span></div>
+      <div id="setupSmtpMsg"></div>
+      <form id="formSmtp" onsubmit="setupSpeichernSmtp(event)">
+        <div class="setup-form-row">
+          <label class="setup-label">SMTP-Host</label>
+          <input type="text" class="setup-input" id="smtp_host" placeholder="smtp.gmail.com">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">SMTP-Port</label>
+          <input type="number" class="setup-input" id="smtp_port" value="587">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Benutzername (E-Mail)</label>
+          <input type="email" class="setup-input" id="smtp_user" placeholder="mein@email.de" autocomplete="off">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Passwort</label>
+          <input type="password" class="setup-input" id="smtp_pass" autocomplete="off">
+          <div class="setup-input-hint">Wird lokal gespeichert — nie im Chat</div>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">IMAP-Host (optional, für Antwort-Erkennung)</label>
+          <input type="text" class="setup-input" id="smtp_imap" placeholder="imap.gmail.com">
+        </div>
+        <button type="submit" class="setup-btn" id="btnSaveSmtp">
+          ${smtpOk ? '✓ SMTP aktualisieren' : '→ SMTP speichern'}
+        </button>
+      </form>
+
+    </div>
+  `;
+}
+
+async function setupSpeichernConfig(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnSaveConfig');
+  btn.disabled = true;
+  btn.textContent = 'Speichert…';
+  const body = {
+    bot_token:       document.getElementById('cfg_token').value.trim(),
+    owner_chat_id:   document.getElementById('cfg_owner').value.trim(),
+    engine_dir:      document.getElementById('cfg_engine').value.trim() || '../b2bbot',
+    data_dir:        document.getElementById('cfg_data').value.trim() || 'data',
+    anthropic_api_key: document.getElementById('cfg_apikey').value.trim(),
+  };
+  try {
+    const r = await fetch('/api/setup/config', {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    const el = document.getElementById('setupConfigMsg');
+    el.innerHTML = `<div class="setup-msg ${d.ok ? 'ok' : 'err'}">${esc(d.meldung)}</div>`;
+    if (d.ok) {
+      document.getElementById('cfg_token').value = '';
+      document.getElementById('cfg_apikey').value = '';
+      await setupLaden();
+    }
+  } catch(err) {
+    document.getElementById('setupConfigMsg').innerHTML =
+      `<div class="setup-msg err">Netzwerkfehler: ${esc(String(err))}</div>`;
+  } finally {
+    if (document.getElementById('btnSaveConfig'))
+      document.getElementById('btnSaveConfig').disabled = false;
+  }
+}
+
+async function setupSpeichernSmtp(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnSaveSmtp');
+  btn.disabled = true;
+  btn.textContent = 'Speichert…';
+  const imap = document.getElementById('smtp_imap').value.trim();
+  const body = {
+    smtp_host:   document.getElementById('smtp_host').value.trim(),
+    smtp_port:   parseInt(document.getElementById('smtp_port').value) || 587,
+    benutzername: document.getElementById('smtp_user').value.trim(),
+    passwort:    document.getElementById('smtp_pass').value,
+    tls: true,
+    imap_host:   imap,
+    imap_port:   993,
+  };
+  try {
+    const r = await fetch('/api/setup/smtp', {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    const el = document.getElementById('setupSmtpMsg');
+    el.innerHTML = `<div class="setup-msg ${d.ok ? 'ok' : 'err'}">${esc(d.meldung)}</div>`;
+    if (d.ok) {
+      document.getElementById('smtp_pass').value = '';
+      await setupLaden();
+    }
+  } catch(err) {
+    document.getElementById('setupSmtpMsg').innerHTML =
+      `<div class="setup-msg err">Netzwerkfehler: ${esc(String(err))}</div>`;
+  } finally {
+    if (document.getElementById('btnSaveSmtp'))
+      document.getElementById('btnSaveSmtp').disabled = false;
+  }
+}
+
+function adminTokenSpeichern() {
+  const inp = document.getElementById('ui_token_input');
+  if (!inp) return;
+  const val = inp.value.trim();
+  // Platzhalter-Wert nicht als echten Token speichern
+  if (val && !val.startsWith('••••')) {
+    localStorage.setItem('hso_admin_token', val);
+    inp.value = '••••gesetzt';
+    const msg = document.getElementById('tokenMsg');
+    if (msg) msg.innerHTML = '<span style="color:var(--green)">✓ Token gespeichert.</span>';
+  } else if (!val) {
+    localStorage.removeItem('hso_admin_token');
+    const msg = document.getElementById('tokenMsg');
+    if (msg) msg.innerHTML = '<span style="color:var(--text2)">Token entfernt.</span>';
+  }
+}
+</script>
+</body>
+</html>

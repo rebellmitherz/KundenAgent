@@ -1,0 +1,8 @@
+{
+  "_hinweis": "Kopiere diese Datei zu product_config.json und fülle die Felder aus.",
+  "bot_token": "",
+  "owner_chat_id": "",
+  "engine_dir": "../b2bbot",
+  "data_dir": "data",
+  "anthropic_api_key": ""
+}

@@ -1,0 +1,42 @@
+# Engine & Closer — eigenständige Projekte, nicht hier verwalten
+b2bbot/
+ClouseAgent/
+
+# Secrets — niemals einchecken
+product/product_config.json
+product/product_smtp.json
+product_config.json
+product_smtp.json
+*.env
+.env
+
+# Lock-Dateien
+product/telegram/operator.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Laufzeit-Daten (Aufträge, Logs, Leads)
+product/data/orders/
+product/data/logs/
+product/data/output/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Windows
+Thumbs.db
+Desktop.ini
