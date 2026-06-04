@@ -31,6 +31,15 @@ if not exist "product_config.json" (
     echo.
 )
 
+:: Installations-Check (schnell, nicht blockierend)
+python ..\product\packaging\check_install.py >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  Installations-Pruefung:
+    python ..\product\packaging\check_install.py
+    echo.
+)
+
 echo Hermes Sales Operator startet...
 python telegram\bot.py
 
