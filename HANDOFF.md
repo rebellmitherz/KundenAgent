@@ -110,7 +110,11 @@ product/setup/test_onboarding.py      28
 product/setup/test_trennung.py        13
 product/closer/test_closer_adapter.py 22
 product/licensing/test_licensing.py   27
-product/packaging/test_packaging.py   31   = 121 grün
+product/packaging/test_packaging.py   31
+product/agent/test_agent.py           31   (Phase A.1 — Werkzeuge)
+product/agent/test_brain.py           26   (Phase A.2 — Agent-Loop)
+                                     ----
+                                     = 178 grün
 ```
 
 Was schon LÄUFT (Teile, noch nicht orchestriert):
@@ -223,10 +227,10 @@ Reasoning-Kern (mit deterministischem Fallback, damit Tests ohne Key laufen).
 ```
 0–13  Produktschicht + Lizenz + Paket .... ✅ (121 Tests grün, auf GitHub)
 A     Das Gehirn (Agent-Loop) ............ 🔄 in Arbeit
-  A.1 agent/tools.py + 31 Tests ......... ✅ (commit ce82c9e)
-  A.2 agent/brain.py — Agent-Loop ........ ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
-  A.3 agent/memory.py — Lauf-Speicher .... ⬜
-  A.4 Tests bereits in test_agent.py ..... ✅ (31 Tests, Tools gemockt)
+  A.1 agent/tools.py + 31 Tests ......... ✅ (commit ce82c9e, Review 456de72)
+  A.2 agent/brain.py + 26 Tests ......... ✅ (commit 724f2b1)
+  A.3 agent/memory.py — Lauf-Speicher .... ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+  A.4 Tests test_agent.py + test_brain.py  ✅ (57 Tests, Claude+Engine gemockt)
   A.5 Telegram + UI Anbindung ............ ⬜
 B     Loops schließen (Send/Reply/Followup) ⬜
 C     Kampagnen-Gedächtnis ............... ⬜
