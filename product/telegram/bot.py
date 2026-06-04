@@ -15,6 +15,10 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from product.agent.runner import AgentRunner
 
 # --- Eigene Module ---
 _PRODUCT_ROOT = Path(__file__).parent.parent.parent
@@ -27,6 +31,7 @@ sys.path.insert(0, str(_TG_SELLER))
 from tg_api import TelegramAPI  # noqa: E402 (aus b2bbot/telegram_seller)
 
 from product.agent.runner import AgentRunner
+from product.agent.watcher import Watcher
 from product.bridge.engine_bridge import EngineBridge, EngineError
 from product.operator.confirm import ConfirmGate
 from product.operator.intake import OperatorIntake
@@ -77,7 +82,35 @@ def _lock_freigeben() -> None:
         pass
 
 
-def _verarbeite_update(upd: dict, tg: TelegramAPI, cfg, mgr: DialogManager) -> None:
+def _agent_status_text(runner: "AgentRunner") -> str:
+    """Kompakter Agent-Überblick: Trichter + offene Tore + Antworten."""
+    try:
+        bericht = runner.funnel_bericht()
+        laeufe  = runner.laeufe()
+        am_tor  = [l for l in laeufe if l.get("status") == "wartet_auf_mensch"]
+        ant     = runner.antworten()
+        termine = [a for a in ant if a.get("terminwunsch")]
+
+        zeilen = [bericht]
+        if am_tor:
+            zeilen.append(
+                f"\n⚠️  {len(am_tor)} Kampagne(n) warten auf deine Freigabe — "
+                "schreib 'freigeben' um die Mails rauszuschicken."
+            )
+        if termine:
+            zeilen.append(
+                f"\n🎯 {len(termine)} Termin-Signal(e) in den Antworten — "
+                "schreib 'Antworten zeigen' für Details."
+            )
+        return "\n".join(zeilen)
+    except Exception:
+        return "📊 Kein Überblick verfügbar (Agent noch nicht gestartet)."
+
+
+def _verarbeite_update(
+    upd: dict, tg: TelegramAPI, cfg, mgr: DialogManager,
+    agent_runner: "AgentRunner"
+) -> None:
     msg = upd.get("message") or upd.get("edited_message")
     if not msg:
         return
@@ -103,7 +136,30 @@ def _verarbeite_update(upd: dict, tg: TelegramAPI, cfg, mgr: DialogManager) -> N
         return
 
     if low == "/status":
-        tg.try_send(chat_id, mgr.status_text(chat_id))
+        # Dialog-Zustand + Agent-Überblick (Trichter + offene Tore + Antworten)
+        dialog_status = mgr.status_text(chat_id)
+        agent_status  = _agent_status_text(agent_runner)
+        tg.try_send(chat_id, dialog_status + "\n\n" + agent_status)
+        return
+
+    # Natürliche Statusabfragen
+    if any(w in low for w in ("wo stehen", "kampagne", "trichter", "wie viele", "überblick")):
+        tg.try_send(chat_id, _agent_status_text(agent_runner))
+        return
+
+    if any(w in low for w in ("antworten zeigen", "antworten", "replies")):
+        tg.try_send(chat_id, agent_runner.antworten_bericht())
+        return
+
+    if any(w in low for w in ("nachfassen zeigen", "wer soll nachgefasst", "fällig")):
+        faellig = agent_runner.nachfass_faellig()
+        if faellig:
+            zeilen = [f"⏰ {len(faellig)} Lead(s) fällig fürs Nachfassen:"]
+            for f in faellig[:10]:
+                zeilen.append(f"   • {f['firma']} (seit {f['faellig_seit'][:10]})")
+            tg.try_send(chat_id, "\n".join(zeilen))
+        else:
+            tg.try_send(chat_id, "Aktuell niemand fällig fürs Nachfassen.")
         return
 
     # --- Dialog (normaler Text / natürliche Sprache) ---
@@ -181,6 +237,16 @@ def main() -> None:
     )
     print("[bot] Agent-Modus aktiv — Aufträge werden eigenständig geführt.")
 
+    # Watcher: prüft alle 5 Min ob etwas gemeldet werden muss (Termin, Tor, Nachfassen)
+    watcher = Watcher(
+        runner=agent_runner,
+        owner_chat_id=cfg.owner_chat_id,
+        send_fn=lambda cid, txt: tg.try_send(cid, txt),
+        intervall_sek=300,
+    )
+    watcher.starten()
+    print("[bot] Watcher gestartet (Intervall: 5 Min) — meldet Tore + Signale.")
+
     mgr = DialogManager(
         intake=intake,
         gate=gate,
@@ -205,7 +271,7 @@ def main() -> None:
             for upd in updates:
                 offset = upd["update_id"] + 1
                 try:
-                    _verarbeite_update(upd, tg, cfg, mgr)
+                    _verarbeite_update(upd, tg, cfg, mgr, agent_runner)
                 except Exception as exc:
                     print(f"[bot] Update-Fehler (ignoriert): {exc}")
 
