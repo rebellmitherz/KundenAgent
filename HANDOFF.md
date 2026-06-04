@@ -127,8 +127,10 @@ product/bridge/test_antworten.py       5   (Phase B.2 — Antworten lesen)
 product/agent/test_replies.py          7   (Phase B.2 — Antworten-Bericht)
 product/bridge/test_followup.py        6   (Phase B.3 — Nachfassen Bridge)
 product/agent/test_nachfassen.py       8   (Phase B.3 — Runner-Nachfassen)
+product/agent/test_funnel.py          21   (Phase C — Trichter + Kampagnen)
+product/bridge/test_kampagne.py        5   (Phase C — Rohdaten read-only)
                                      ----
-                                     = 247 grün
+                                     = 273 grün
 ```
 
 WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
@@ -154,6 +156,8 @@ Was schon LÄUFT:
 - ✅ Senden nach Freigabe (B.1) — human-gated, fail-closed, OUTREACH_SEND_CONFIRMED
 - ✅ Antworten lesen + melden (B.2) — read-only aus reply_queue.json
 - ✅ Nachfassen (B.3) — human-gated followups + read-only Fällig-Vorschau
+- ✅ Kampagnen-Trichter (C) — je Lead Stufe gefunden→bereit→angeschrieben→
+  geantwortet→termin, aus Pipeline+reply_queue; persistenter Verlauf/Trend
 - ⬜ Versand-Abruf-Trigger (process-replies/IMAP) bewusst NICHT gebaut (siehe §4-Notiz)
 
 ---
@@ -266,6 +270,6 @@ B     Loops schließen (Send/Reply/Followup) ✅ FERTIG
   B.1 Senden nach Freigabe (human-gated)  ✅ (commit 34e2c44, +13 Tests)
   B.2 Antworten lesen + melden (read-only) ✅ (commit 47860a6, +12 Tests)
   B.3 Nachfassen (human-gated followups) . ✅ (commit ffe7743, +14 Tests)
-C     Kampagnen-Gedächtnis ............... ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
-D     Tore + Push-Meldungen .............. ⬜
+C     Kampagnen-Gedächtnis ............... ✅ (commit c9198f9, +26 Tests)
+D     Tore + Push-Meldungen .............. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
 ```
