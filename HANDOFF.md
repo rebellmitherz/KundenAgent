@@ -222,7 +222,12 @@ Reasoning-Kern (mit deterministischem Fallback, damit Tests ohne Key laufen).
 
 ```
 0–13  Produktschicht + Lizenz + Paket .... ✅ (121 Tests grün, auf GitHub)
-A     Das Gehirn (Agent-Loop) ............ ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+A     Das Gehirn (Agent-Loop) ............ 🔄 in Arbeit
+  A.1 agent/tools.py + 31 Tests ......... ✅ (commit ce82c9e)
+  A.2 agent/brain.py — Agent-Loop ........ ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
+  A.3 agent/memory.py — Lauf-Speicher .... ⬜
+  A.4 Tests bereits in test_agent.py ..... ✅ (31 Tests, Tools gemockt)
+  A.5 Telegram + UI Anbindung ............ ⬜
 B     Loops schließen (Send/Reply/Followup) ⬜
 C     Kampagnen-Gedächtnis ............... ⬜
 D     Tore + Push-Meldungen .............. ⬜
