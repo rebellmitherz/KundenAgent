@@ -125,8 +125,10 @@ product/bridge/test_freigabe.py        6   (Phase B.1 — Sende-Tor Bridge)
 product/agent/test_freigeben.py        7   (Phase B.1 — Runner-Freigabe)
 product/bridge/test_antworten.py       5   (Phase B.2 — Antworten lesen)
 product/agent/test_replies.py          7   (Phase B.2 — Antworten-Bericht)
+product/bridge/test_followup.py        6   (Phase B.3 — Nachfassen Bridge)
+product/agent/test_nachfassen.py       8   (Phase B.3 — Runner-Nachfassen)
                                      ----
-                                     = 233 grün
+                                     = 247 grün
 ```
 
 WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
@@ -149,9 +151,10 @@ Was schon LÄUFT:
 - ✅ Mail-Vorschau + Freigabe-Gate (UI)
 - ✅ Bridge zu mine.py
 - ✅ `llm_anthropic.py` (optionaler Claude-Adapter, Key nur aus os.environ)
-- ⬜ Senden nach Freigabe real wiren (Bridge V2 angelegt, nicht fertig)  ← Phase B
-- ⬜ Antworten überwachen (b2bbot: `mine.py --outreach process-replies`)  ← Phase B
-- ⬜ Follow-up automatisch (b2bbot: `modules/.../followup_engine.py`)  ← Phase B
+- ✅ Senden nach Freigabe (B.1) — human-gated, fail-closed, OUTREACH_SEND_CONFIRMED
+- ✅ Antworten lesen + melden (B.2) — read-only aus reply_queue.json
+- ✅ Nachfassen (B.3) — human-gated followups + read-only Fällig-Vorschau
+- ⬜ Versand-Abruf-Trigger (process-replies/IMAP) bewusst NICHT gebaut (siehe §4-Notiz)
 
 ---
 
@@ -259,10 +262,10 @@ A     Das Gehirn (Agent-Loop) ............ ✅ FERTIG
   A.3 agent/memory.py + 18 Tests ........ ✅ (commit b87969b)
   A.4 Tests agent/brain/memory/runner ... ✅ (83 Agent-Tests, Claude+Engine gemockt)
   A.5 agent/runner.py + Telegram + UI ... ✅ (commit f0fbcda, live verifiziert)
-B     Loops schließen (Send/Reply/Followup) 🔄 in Arbeit
+B     Loops schließen (Send/Reply/Followup) ✅ FERTIG
   B.1 Senden nach Freigabe (human-gated)  ✅ (commit 34e2c44, +13 Tests)
   B.2 Antworten lesen + melden (read-only) ✅ (commit 47860a6, +12 Tests)
-  B.3 Follow-up automatisch (followups) .. ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
-C     Kampagnen-Gedächtnis ............... ⬜
+  B.3 Nachfassen (human-gated followups) . ✅ (commit ffe7743, +14 Tests)
+C     Kampagnen-Gedächtnis ............... ⬜  ← NÄCHSTER SCHRITT (Opus 4.8 / High)
 D     Tore + Push-Meldungen .............. ⬜
 ```
