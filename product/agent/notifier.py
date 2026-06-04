@@ -54,7 +54,9 @@ def meldungen_ermitteln(
             f"🎯 Termin-Signal{'e' if len(termine)>1 else ''}!\n\n"
             f"{firmen}{mehr} {'haben' if len(termine)>1 else 'hat'} geantwortet "
             f"und {'wollen' if len(termine)>1 else 'will'} einen Termin.\n\n"
-            f"👉 Schreib mir 'Antworten zeigen' um die Details zu sehen."
+            f"👉 Schreib 'Antworten zeigen' für Details.\n"
+            f"🎤 Wenn du den Call anfängst: schreib 'closer starten' — "
+            f"ich coache dich live."
         )
         sig = _hash(f"termin:{'|'.join(a.get('entry_key','') for a in termine)}")
         if sig not in gesendete_signaturen:

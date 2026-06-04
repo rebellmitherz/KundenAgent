@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from product.agent.runner import AgentRunner
+    from product.closer.closer_adapter import CloserAdapter
 
 # --- Eigene Module ---
 _PRODUCT_ROOT = Path(__file__).parent.parent.parent
@@ -33,6 +34,7 @@ from tg_api import TelegramAPI  # noqa: E402 (aus b2bbot/telegram_seller)
 from product.agent.runner import AgentRunner
 from product.agent.watcher import Watcher
 from product.bridge.engine_bridge import EngineBridge, EngineError
+from product.closer.closer_adapter import CloserAdapter
 from product.operator.confirm import ConfirmGate
 from product.operator.intake import OperatorIntake
 from product.operator.llm_anthropic import build_anthropic_llm
@@ -109,7 +111,8 @@ def _agent_status_text(runner: "AgentRunner") -> str:
 
 def _verarbeite_update(
     upd: dict, tg: TelegramAPI, cfg, mgr: DialogManager,
-    agent_runner: "AgentRunner"
+    agent_runner: "AgentRunner",
+    closer: "CloserAdapter",
 ) -> None:
     msg = upd.get("message") or upd.get("edited_message")
     if not msg:
@@ -160,6 +163,43 @@ def _verarbeite_update(
             tg.try_send(chat_id, "\n".join(zeilen))
         else:
             tg.try_send(chat_id, "Aktuell niemand fällig fürs Nachfassen.")
+        return
+
+    # --- Closer-Befehle (eigenständig, nicht im B2B-Fluss) ---
+    if any(w in low for w in ("closer starten", "closer start", "call starten",
+                               "coaching starten", "/closer starten")):
+        erg = closer.starten()
+        if erg["ok"]:
+            tg.try_send(chat_id,
+                "🎤 Closer gestartet — Live-Coaching läuft.\n\n"
+                "Ich höre Verkäufer + Kunde ab und gebe Echtzeit-Tipps.\n"
+                "Schreib 'closer stoppen' wenn der Call fertig ist.")
+        else:
+            tg.try_send(chat_id, f"⚠️ Closer konnte nicht starten: {erg['meldung']}")
+        return
+
+    if any(w in low for w in ("closer stoppen", "closer stop", "call stoppen",
+                               "coaching stoppen", "/closer stoppen")):
+        erg = closer.stoppen()
+        if erg["ok"]:
+            tg.try_send(chat_id, "✅ Closer gestoppt. Guter Call!")
+        else:
+            tg.try_send(chat_id, f"ℹ️ {erg['meldung']}")
+        return
+
+    if any(w in low for w in ("closer status", "closer", "/closer")):
+        st = closer.status()
+        if st.get("laeuft"):
+            tg.try_send(chat_id,
+                "🎤 Closer läuft gerade — Live-Coaching aktiv.\n"
+                "Schreib 'closer stoppen' wenn der Call fertig ist.")
+        elif not st.get("closer_verfuegbar"):
+            tg.try_send(chat_id,
+                "⚠️ Closer nicht installiert. "
+                "Stelle sicher dass ClouseAgent im richtigen Ordner liegt.")
+        else:
+            tg.try_send(chat_id,
+                "🎤 Closer ist bereit — schreib 'closer starten' wenn du einen Call anfängst.")
         return
 
     # --- Dialog (normaler Text / natürliche Sprache) ---
@@ -247,6 +287,14 @@ def main() -> None:
     watcher.starten()
     print("[bot] Watcher gestartet (Intervall: 5 Min) — meldet Tore + Signale.")
 
+    # Closer: eigenständig, NICHT im B2B-Fluss. Nur für Live-Calls nach Termin-Signal.
+    closer_dir = (_PRODUCT_ROOT / "ClouseAgent").resolve()
+    closer = CloserAdapter(closer_dir)
+    if closer_dir.exists():
+        print(f"[bot] Closer verfügbar: {closer_dir}")
+    else:
+        print(f"[bot] Closer nicht gefunden ({closer_dir}) — Befehle melden das.")
+
     mgr = DialogManager(
         intake=intake,
         gate=gate,
@@ -271,7 +319,7 @@ def main() -> None:
             for upd in updates:
                 offset = upd["update_id"] + 1
                 try:
-                    _verarbeite_update(upd, tg, cfg, mgr, agent_runner)
+                    _verarbeite_update(upd, tg, cfg, mgr, agent_runner, closer)
                 except Exception as exc:
                     print(f"[bot] Update-Fehler (ignoriert): {exc}")
 
