@@ -90,7 +90,7 @@ def setup_config(ziel: Path) -> bool:
     """
     print()
     print("═" * 58)
-    print("  Hermes Sales Operator — Ersteinrichtung")
+    print("  Rebellsystem Sales Operator — Ersteinrichtung")
     print("═" * 58)
 
     if ziel.exists():
@@ -136,7 +136,7 @@ def setup_config(ziel: Path) -> bool:
 
     # ── Lizenz-Key ───────────────────────────────────────────────────────
     print()
-    print("  Lizenz-Schlüssel (von Hermes erhalten).")
+    print("  Lizenz-Schlüssel (von Rebellsystem erhalten).")
     print("  Leer lassen = Entwicklungsmodus (alle Features aktiv).")
     license_key = _eingabe("Lizenz-Schlüssel", default="", pflicht=False)
     if license_key:

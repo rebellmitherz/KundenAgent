@@ -1,5 +1,5 @@
 @echo off
-:: Hermes Sales Operator — Mini-UI starten + Browser oeffnen
+:: Rebellsystem Sales Operator — Mini-UI starten + Browser oeffnen
 setlocal
 cd /d "%~dp0"
 set PYTHONUTF8=1
@@ -11,7 +11,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Hermes UI startet auf http://127.0.0.1:8767 ...
+echo Rebellsystem UI startet auf http://127.0.0.1:8767 ...
 start /B python product\ui\server.py
 
 timeout /t 2 /nobreak >nul

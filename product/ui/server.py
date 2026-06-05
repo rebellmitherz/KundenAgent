@@ -52,7 +52,7 @@ _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
                      "/api/agent/nachfassen", "/api/agent/auftrag",
-                     "/api/agent/termin-abschliessen",
+                     "/api/agent/termin-abschliessen", "/api/agent/antworten-abrufen",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
@@ -159,6 +159,10 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._handle_agent_termin_abschliessen()
+        elif self.path == "/api/agent/antworten-abrufen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_agent_antworten_abrufen()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
                 self._403(); return
@@ -374,6 +378,20 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             self._json(_agent_runner.termin_abschliessen(firma))
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_agent_antworten_abrufen(self):
+        """POST /api/agent/antworten-abrufen — E: Postfach aktiv abrufen.
+
+        Read-only zum Postfach (IMAP), kein Versand: die Bridge erzwingt alle
+        Auto-Send-Gates auf AUS. Antwort: {ok, neu, gesamt, meldung}.
+        """
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        try:
+            self._json(_agent_runner.antworten_abrufen())
         except Exception as e:
             self._json({"ok": False, "meldung": str(e)})
 

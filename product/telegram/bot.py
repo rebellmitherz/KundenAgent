@@ -1,4 +1,4 @@
-"""Hermes Sales Operator — Kunden-Telegram-Bot.
+"""Rebellsystem Sales Operator — Kunden-Telegram-Bot.
 
 Einstiegspunkt: python bot.py  (oder über start_operator.bat)
 
@@ -46,7 +46,7 @@ from product.telegram.dialog import DialogManager
 _LOCK_DATEI = Path(__file__).parent / "operator.lock"
 
 HILFE_TEXT = """\
-Hermes Sales Operator
+Rebellsystem Sales Operator
 
 Schreib mir einfach, was du suchst — ganz normal:
   "Such 100 Handwerker in NRW, ich verkaufe Websites"
@@ -57,6 +57,7 @@ starte die Suche erst nach deiner Bestätigung.
 
 Befehle:
   /status              — Status + Kampagnen-Überblick
+  Antworten abrufen    — Postfach jetzt prüfen (hole ich sonst alle 5 Min selbst)
   Antworten            — Überblick eingegangener Antworten
   Mail zeigen          — volle Antworten (auf welche Mail + Text)
   Termin aufbereiten   — Termin-Anfragen im Detail
@@ -168,6 +169,17 @@ def _verarbeite_update(
         tg.try_send(chat_id, erg.get("meldung", "Erledigt."))
         return
 
+    # Postfach aktiv abrufen (E) — read-only, kein Versand
+    if any(w in low for w in ("antworten abrufen", "postfach prüfen", "postfach pruefen",
+                               "post abrufen", "mails abrufen", "neue antworten")):
+        tg.try_send(chat_id, "📥 Ich prüfe das Postfach…")
+        erg = agent_runner.antworten_abrufen()
+        if erg.get("ok"):
+            tg.try_send(chat_id, f"✅ {erg.get('meldung','Abruf fertig.')}\n\n{agent_runner.antworten_bericht()}")
+        else:
+            tg.try_send(chat_id, f"⚠️ {erg.get('meldung','Abruf nicht möglich.')}")
+        return
+
     # Volle Detail-Ansicht aller Antworten (auf welche Mail + Antworttext)
     if any(w in low for w in ("mail zeigen", "mails zeigen", "antwort details",
                                "ganze antwort", "volle antwort", "alle antworten zeigen",
@@ -255,7 +267,7 @@ def _owner_registrieren(cfg, chat_id: str) -> None:
 def main() -> None:
     _lock_pruefen()
 
-    print("[boot] Hermes Sales Operator startet…")
+    print("[boot] Rebellsystem Sales Operator startet…")
 
     # --- Config laden ---
     try:
@@ -309,14 +321,17 @@ def main() -> None:
     print("[bot] Agent-Modus aktiv — Aufträge werden eigenständig geführt.")
 
     # Watcher: prüft alle 5 Min ob etwas gemeldet werden muss (Termin, Tor, Nachfassen)
+    # auto_abruf=True (E): ruft das Postfach selbst ab (read-only, kein Versand) —
+    # so erkennt der Bot neue Antworten vollautomatisch.
     watcher = Watcher(
         runner=agent_runner,
         owner_chat_id=cfg.owner_chat_id,
         send_fn=lambda cid, txt: tg.try_send(cid, txt),
         intervall_sek=300,
+        auto_abruf=True,
     )
     watcher.starten()
-    print("[bot] Watcher gestartet (Intervall: 5 Min) — meldet Tore + Signale.")
+    print("[bot] Watcher gestartet (Intervall: 5 Min, Auto-Abruf an) — meldet Tore + Signale.")
 
     # Closer: eigenständig, NICHT im B2B-Fluss. Nur für Live-Calls nach Termin-Signal.
     closer_dir = (_PRODUCT_ROOT / "ClouseAgent").resolve()

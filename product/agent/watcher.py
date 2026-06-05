@@ -30,11 +30,13 @@ class Watcher:
         owner_chat_id: str,
         send_fn: SendFn,
         intervall_sek: int = 300,      # 5 Minuten Standard
+        auto_abruf: bool = False,      # E: Postfach selbst abrufen (read-only)
     ):
         self._runner       = runner
         self._owner        = owner_chat_id
         self._send         = send_fn
         self._intervall    = intervall_sek
+        self._auto_abruf   = auto_abruf
         self._stop_evt     = threading.Event()
         self._gesendete_signaturen: set[str] = set()
         self._thread: Optional[threading.Thread] = None
@@ -65,6 +67,15 @@ class Watcher:
             self._stop_evt.wait(self._intervall)
 
     def _pruefen_und_senden(self) -> list[str]:
+        # E: Optional zuerst das Postfach abrufen (read-only, kein Versand —
+        # die Bridge erzwingt alle Auto-Send-Gates auf AUS). So findet der
+        # Watcher auch brandneue Antworten, nicht nur bereits abgerufene.
+        if self._auto_abruf:
+            try:
+                self._runner.antworten_abrufen()
+            except Exception as exc:
+                print(f"[watcher] Abruf übersprungen: {exc}")
+
         try:
             laeufe           = self._runner.laeufe()
             antworten        = self._runner.antworten()

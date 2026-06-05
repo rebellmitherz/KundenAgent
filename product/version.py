@@ -1,4 +1,4 @@
-"""Versions-Manifest für Hermes Sales Operator.
+"""Versions-Manifest für Rebellsystem Sales Operator.
 
 Einzige Quelle der Wahrheit für Version, Build-Datum und Komponenten-Versionen.
 Wird vom Package-Skript und vom Installations-Checker gelesen.
@@ -6,7 +6,7 @@ Wird vom Package-Skript und vom Installations-Checker gelesen.
 from __future__ import annotations
 
 VERSION = "1.0.0"
-PRODUCT_NAME = "Hermes Sales Operator"
+PRODUCT_NAME = "Rebellsystem Sales Operator"
 BUILD_DATE = "2026-06-04"
 
 # Mindest-Python-Version

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Hermes Sales Operator</title>
+<title>Rebellsystem Sales Operator</title>
 <style>
 /* ─── Reset & Basis ──────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1033,7 +1033,7 @@ html, body {
   <div class="header">
     <div class="logo">
       <div class="orb" id="orb"></div>
-      <div class="logo-text"><span>Hermes</span> Sales Operator</div>
+      <div class="logo-text"><span>Rebellsystem</span> Sales Operator</div>
     </div>
     <div class="status-dot">
       <div class="dot" id="statusDot"></div>
@@ -1553,12 +1553,14 @@ async function ladenAntworten() {
   }
 }
 
+const _ABRUF_BTN = `<button class="setup-btn" style="margin-bottom:16px" id="abrufBtn" onclick="antwortenAbrufen()">📥 Postfach jetzt abrufen</button><div id="abrufMsg"></div>`;
+
 function renderAntworten(d) {
   const el = document.getElementById('antwortenContent');
   const liste = (d && d.antworten) || [];
   if (!liste.length) {
-    el.innerHTML = emptyState('📭', 'Noch keine Antworten',
-      'Sobald jemand auf eine Kampagne antwortet, erscheint sie hier.');
+    el.innerHTML = _ABRUF_BTN + emptyState('📭', 'Noch keine Antworten',
+      'Klick „Postfach jetzt abrufen" — oder ich hole sie alle 5 Min selbst.');
     return;
   }
   // Echte Antworten zuerst, Auto-Antworten ans Ende
@@ -1566,7 +1568,7 @@ function renderAntworten(d) {
   const autos = liste.filter(a => a.auto_antwort);
   const geordnet = echte.concat(autos);
 
-  let html = '';
+  let html = _ABRUF_BTN;
   if (d.bericht) html += `<div class="antwort-summary">${esc(d.bericht)}</div>`;
 
   for (const a of geordnet) {
@@ -1607,6 +1609,24 @@ async function terminAbschliessen(firma, btn) {
     else if (btn) { btn.disabled = false; btn.textContent = '✅ Termin abschließen'; alert(d.meldung || 'Fehler'); }
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = '✅ Termin abschließen'; }
+  }
+}
+
+async function antwortenAbrufen() {
+  const btn = document.getElementById('abrufBtn');
+  const msg = document.getElementById('abrufMsg');
+  if (btn) { btn.disabled = true; btn.textContent = '📥 Prüfe Postfach…'; }
+  try {
+    const r = await fetch('/api/agent/antworten-abrufen', { method: 'POST', headers: _adminHeaders() });
+    const d = await r.json();
+    if (msg) {
+      msg.innerHTML = `<div class="freigabe-result ${d.ok ? 'ok' : 'err'}" style="display:block;margin:0 0 16px">${d.ok ? '✅' : '⚠️'} ${esc(d.meldung || '')}</div>`;
+    }
+    if (d.ok) { ladenAntworten(); }   // neu rendern (Button kommt frisch mit)
+  } catch (e) {
+    if (msg) msg.innerHTML = `<div class="freigabe-result err" style="display:block;margin:0 0 16px">Verbindungsfehler: ${esc(String(e))}</div>`;
+  } finally {
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = '📥 Postfach jetzt abrufen'; }
   }
 }
 

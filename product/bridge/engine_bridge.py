@@ -240,6 +240,55 @@ class EngineBridge:
     def _reply_queue_pfad(self) -> Path:
         return self._output_dir() / "reply_queue.json"
 
+    # Sicherheits-Flags fuer den Antwort-Abruf (E). Alle harten Auto-Send-Gates
+    # der Engine werden scoped auf AUS gezwungen — process-replies darf NUR
+    # abrufen + klassifizieren + reply_queue schreiben, NIEMALS selbst senden.
+    # Die Faehigkeit bleibt in der Engine (Flags umlegbar); unsere Produktregel
+    # haelt sie hart aus. .env wird mit override=False geladen → diese Werte gewinnen.
+    _ABRUF_SAFE_ENV = {
+        "REPLY_DRY_RUN": "1",              # queue only, kein Auto-Reply-Versand
+        "REPLY_AUTO_SEND": "false",
+        "REPLY_AUTO_SEND_CONFIRMED": "false",
+        "OUTREACH_SEND_CONFIRMED": "false",
+        "OUTREACH_FULL_AUTO_CONFIRMED": "false",
+    }
+
+    def _reply_queue_anzahl(self) -> int:
+        pfad = self._reply_queue_pfad()
+        if not pfad.exists():
+            return 0
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+            return len(data.get("items", []) if isinstance(data, dict) else [])
+        except Exception:
+            return 0
+
+    def antworten_abrufen(self, limit: int = 30, timeout: int = 240) -> EngineBrueckenErgebnis:
+        """E: Holt neue Antworten aktiv aus dem Postfach (IMAP) und klassifiziert.
+
+        Ruft `mine.py --outreach process-replies`. FAIL-CLOSED gegen Versand:
+        alle Auto-Send-Gates werden scoped auf AUS gezwungen (_ABRUF_SAFE_ENV) —
+        es kann hier NICHTS gesendet werden, nur abgerufen + in reply_queue.json
+        geschrieben. Read-only zum Postfach, kein SMTP.
+        """
+        vorher = self._reply_queue_anzahl()
+        rc, out = self._run(
+            ["--outreach", "process-replies", "--outreach-limit", str(limit)],
+            timeout=timeout,
+            extra_env=dict(self._ABRUF_SAFE_ENV),
+        )
+        if rc != 0:
+            return EngineBrueckenErgebnis(ok=False, meldung=f"Abruf fehlgeschlagen:\n{out[-400:]}")
+        nachher = self._reply_queue_anzahl()
+        neu = max(0, nachher - vorher)
+        return EngineBrueckenErgebnis(
+            ok=True,
+            leads_gefunden=neu,
+            leads_sauber=nachher,
+            meldung=(f"{neu} neue Antwort(en) abgerufen." if neu else "Keine neuen Antworten."),
+            rohdaten={"neu": neu, "gesamt": nachher},
+        )
+
     def _entry_key_firmen(self) -> dict:
         """Map entry_key → Firmenname aus der Pipeline (für hübsche Anzeige)."""
         pfad = self._pipeline_pfad()

@@ -163,6 +163,28 @@ class AgentRunner:
             a["erledigt"] = a.get("entry_key", "") in erledigte
         return roh
 
+    def antworten_abrufen(self, limit: int = 30) -> dict:
+        """E: Holt aktiv neue Antworten aus dem Postfach (read-only, kein Versand).
+
+        Delegiert an die Bridge, die alle Auto-Send-Gates scoped aushält. Danach
+        stehen neue Antworten via antworten()/termin_signale() bereit. Gibt einen
+        kundenfähigen Statusdict zurück.
+        """
+        if self._bridge is None:
+            return {"ok": False, "meldung": "Engine nicht verbunden."}
+        if not hasattr(self._bridge, "antworten_abrufen"):
+            return {"ok": False, "meldung": "Abruf nicht verfügbar."}
+        try:
+            erg = self._bridge.antworten_abrufen(limit=limit)
+            return {
+                "ok": erg.ok,
+                "neu": erg.leads_gefunden,
+                "gesamt": erg.leads_sauber,
+                "meldung": erg.meldung,
+            }
+        except Exception as exc:
+            return {"ok": False, "meldung": f"Abruf-Fehler: {exc}"}
+
     def antworten_bericht(self, limit: int = 30) -> str:
         """Kundenfähige Zusammenfassung der Antworten (hebt Terminwünsche hervor)."""
         return antworten_bericht(self.antworten(limit=limit))

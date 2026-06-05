@@ -1,5 +1,5 @@
 @echo off
-:: Hermes Sales Operator — Start-Script
+:: Rebellsystem Sales Operator — Start-Script
 :: Kein hardcodierter Pfad. Läuft aus dem product/-Ordner heraus.
 
 setlocal
@@ -17,7 +17,7 @@ if errorlevel 1 (
 :: Config prüfen — bei fehlendem Config Onboarding starten
 if not exist "product_config.json" (
     echo.
-    echo  Willkommen bei Hermes Sales Operator.
+    echo  Willkommen bei Rebellsystem Sales Operator.
     echo  Erste Einrichtung wird gestartet...
     echo.
     python setup\onboarding.py
@@ -40,7 +40,7 @@ if errorlevel 1 (
     echo.
 )
 
-echo Hermes Sales Operator startet...
+echo Rebellsystem Sales Operator startet...
 python telegram\bot.py
 
 pause

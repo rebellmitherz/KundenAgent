@@ -45,7 +45,7 @@ class TestVersion(unittest.TestCase):
     def test_version_string(self):
         s = version_string()
         assert VERSION in s
-        assert "Hermes" in s
+        assert "Rebellsystem" in s
 
     def test_min_python(self):
         assert len(MIN_PYTHON) == 2
