@@ -288,10 +288,14 @@ Antwort-Details + Termin abschließen .... ✅ (commit 9391240, +15 Tests, 309 t
   - agent/erledigt.py: erledigte Termine agent-lokal, raus aus Push/Überblick/Detail
   - Telegram-Befehle: 'Mail zeigen', 'Termin aufbereiten', 'Termin abschließen <Firma>'
 Desktop-Button 'Hermes UI' .............. ✅ (commit cf88262, start_ui.bat öffnet Browser)
+D: Agent in der UI + Auftrag aus Browser  ✅ (commit e7638dd, +5 Tests, 314 total)
+  - memory.lauf_anlegen + runner.starten_im_hintergrund (async, stoppt am harten Tor)
+  - server: POST /api/agent/auftrag + /api/agent/termin-abschliessen (admin-gated)
+  - dashboard.html: Tabs Kampagne (Trichter), Antworten (Detail-Karten), Neuer Auftrag
+  - Hinweis: Browser muss http://127.0.0.1:8767 sein (IPv4), nicht localhost (IPv6)
 
-⬜ OFFEN (vom User freigegeben, in Arbeit):
-  D-UI: UI zeigt Agent NICHT (kein Antworten-/Kampagnen-Tab, kein Auftrag-Formular).
-        Server-Endpunkte existieren (/api/agent/antworten|funnel|laeufe), nur Frontend
-        fehlt. Nächster Schritt: dashboard.html erweitern + POST /api/agent/auftrag.
-  E (NICHT freigegeben): aktiver IMAP-Abruf (process-replies) — sicherheitskritisch.
+⬜ OFFEN:
+  E (NICHT freigegeben): aktiver IMAP-Abruf (process-replies) — sicherheitskritisch,
+     nur scoped REPLY_AUTO_SEND=false bauen. Heute liest der Bot nur bereits
+     abgerufene Antworten (reply_queue.json), prüft das Postfach nicht selbst.
 ```
