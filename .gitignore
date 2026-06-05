@@ -16,6 +16,11 @@ product_smtp.json
 # Lock-Dateien
 product/telegram/operator.lock
 
+# Mandanten-Register (enthält Kunden-Secrets: Lizenz, Keys, Tokens) — nie einchecken
+mandanten.json
+product/data/platform/
+product/data/mandanten/
+
 # Python
 __pycache__/
 *.py[cod]

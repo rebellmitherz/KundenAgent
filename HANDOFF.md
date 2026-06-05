@@ -321,8 +321,26 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        (antwort_ohne_bezug/termin_ohne_bezug) statt unsichtbar zu verschwinden.
      - funnel.stufe_von: Domain-Fallback (rückwärtskompatibel); Bericht weist
        'ohne Bezug' aus. Live belegt: 5 verwaiste Antworten (1 Termin) jetzt sichtbar.
-  F3 Revenue-First-Sicht (eine Kennzeile) ............. ⬜ (Sonnet 4.6 / mittel)
-  F4 Branding + Lizenz-Secret härten .................. ⬜ (Sonnet 4.6 / niedrig)
-  F5 Mandantenfähigkeit (Pro-Kunde-Profile) ........... ⬜ (Opus 4.8 / high)
-  F6 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
+
+  >>> PIVOT (Kunden-Vorgabe): Das Produkt ist eine BRANCHENUNABHÄNGIGE
+      MULTI-MANDANTEN-B2B-AKQUISE-PLATTFORM (SaaS, "Vermietung" = System
+      vermieten, NICHT Immobilien). Jeder Kunde = isolierter Agent (eigene
+      Zielgruppe, Postfach/Engine, Pipeline, Historie, Reporting, Lizenz).
+      Mandantenfähigkeit ist der KERN. Keine Immobilien-Architektur; bestehende
+      Akquise-/Reply-/Follow-up-/Handoff-Logik wird verallgemeinert, nicht
+      eingeschränkt. Neue F-Roadmap: <<<
+
+  F3 Mandanten-Modell (Plattform-Fundament) ........... ✅ (+18 Tests)
+     - product/platform/mandant.py: Mandant (Datensatz) + MandantenRegister.
+       Harte Isolation: eigenes data_dir je Mandant (aus ID abgeleitet),
+       kein geteiltes engine_dir unter aktiven Mandanten, eindeutige Slug-IDs.
+       per_owner()-Routing (Telegram), atomare Persistenz. Reine Daten-/FS-Logik.
+       Register-Datei (Secrets!) gitignored.
+  F4 Plattform-Orchestrierung ......................... ⬜ (Opus 4.8 / high)
+     - pro Mandant isolierter Runner/Bridge (Factory); Telegram-Routing per
+       owner_chat_id; Watcher je Mandant. Nichts Bestehendes einschränken.
+  F5 Revenue-Reporting pro Mandant + Operator-Gesamtsicht ⬜ (Sonnet 4.6 / mittel)
+     - Hero-Metrik: geprüfte Termine (F1) je Kunde; Cross-Mandanten-Übersicht.
+  F6 Branding + Lizenz härten (Mandanten-Lizenz) ...... ⬜ (Sonnet 4.6 / niedrig)
+  F7 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
 ```
