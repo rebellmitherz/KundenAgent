@@ -17,6 +17,8 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Optional
 
+from product.agent.signalqualitaet import triage
+
 
 @dataclass
 class Meldung:
@@ -45,8 +47,13 @@ def meldungen_ermitteln(
     """
     meldungen: list[Meldung] = []
 
-    # 1. Termin-Signale (höchste Priorität) — erledigte ausgeblendet
-    termine = [a for a in antworten if a.get("terminwunsch") and not a.get("erledigt")]
+    # F1: Termin-Signale durch die Signalqualitäts-Triage. Nur bestätigte
+    # werden laut als Termin gemeldet; widersprüchliche kommen leise zur Prüfung.
+    sortiert = triage(antworten)
+    termine = sortiert["bestaetigt"]
+    zu_pruefen = sortiert["pruefen"]
+
+    # 1. Bestätigte Termin-Signale (höchste Priorität)
     if termine:
         firmen = ", ".join(a.get("firma", "?") for a in termine[:3])
         mehr = f" und {len(termine)-3} weitere" if len(termine) > 3 else ""
@@ -61,6 +68,24 @@ def meldungen_ermitteln(
         sig = _hash(f"termin:{'|'.join(a.get('entry_key','') for a in termine)}")
         if sig not in gesendete_signaturen:
             meldungen.append(Meldung(text=text, signatur=sig, prioritaet=1))
+
+    # 1b. Zur Prüfung (F1): Signale, die wie ein Termin markiert waren, dem Text
+    # nach aber widersprüchlich sind (Absage/Abwesenheit). Ehrlich melden, NICHT
+    # als sicheren Termin verkaufen — niedrigere Priorität als ein echter Termin.
+    if zu_pruefen:
+        firmen = ", ".join(a.get("firma", "?") for a in zu_pruefen[:3])
+        mehr = f" und {len(zu_pruefen)-3} weitere" if len(zu_pruefen) > 3 else ""
+        text = (
+            f"🔎 {len(zu_pruefen)} Antwort{'en' if len(zu_pruefen)>1 else ''} "
+            "zur Prüfung\n\n"
+            f"{firmen}{mehr} {'haben' if len(zu_pruefen)>1 else 'hat'} geantwortet — "
+            "der Text wirkt aber nicht eindeutig nach einem Termin "
+            "(eher Absage oder Abwesenheit).\n\n"
+            f"👉 Schreib 'Mail zeigen', dann entscheidest du selbst."
+        )
+        sig = _hash(f"pruefen:{'|'.join(a.get('entry_key','') for a in zu_pruefen)}")
+        if sig not in gesendete_signaturen:
+            meldungen.append(Meldung(text=text, signatur=sig, prioritaet=2))
 
     # 2. Harte Tore offen (wartet auf Freigabe)
     am_tor = [l for l in laeufe if l.get("status") == "wartet_auf_mensch"]

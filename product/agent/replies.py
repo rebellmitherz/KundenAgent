@@ -8,6 +8,8 @@ Kein Versand, keine Engine-Aufrufe. Nur Text.
 """
 from __future__ import annotations
 
+from product.agent.signalqualitaet import triage
+
 
 def _ist_positiv(antwort: dict) -> bool:
     klasse = (antwort.get("klasse") or "").lower()
@@ -21,11 +23,22 @@ def _ist_positiv(antwort: dict) -> bool:
     return False
 
 
-def termine(antworten: list[dict]) -> list[dict]:
-    """Offene Antworten mit Terminwunsch — das harte Signal für Phase D.
+def termine(antworten: list[dict], llm_fn=None) -> list[dict]:
+    """Offene, **bestätigte** Termin-Signale — das harte Signal für Phase D.
 
-    Erledigte Termine (a['erledigt']) werden ausgeblendet."""
-    return [a for a in antworten if a.get("terminwunsch") and not a.get("erledigt")]
+    Seit F1 läuft jedes Termin-Signal durch die Signalqualitäts-Triage: nur
+    Antworten, die der Prüfung standhalten (keine Auto-Antwort, keine klare
+    Absage), gelten als bestätigter Termin. Erledigte werden ausgeblendet.
+    Widersprüchliche Signale landen in pruef_termine() statt hier."""
+    return triage(antworten, llm_fn=llm_fn)["bestaetigt"]
+
+
+def pruef_termine(antworten: list[dict], llm_fn=None) -> list[dict]:
+    """Offene Termin-Signale, die der Prüfung NICHT eindeutig standhalten.
+
+    Werden dem Menschen leise zur Prüfung vorgelegt — nie als sicherer Termin
+    verkauft (Engine-Fehlalarme, Abwesenheitsnotizen)."""
+    return triage(antworten, llm_fn=llm_fn)["pruefen"]
 
 
 def _datum_kurz(wert: str) -> str:
@@ -106,8 +119,13 @@ def antworten_bericht(antworten: list[dict]) -> str:
         return "📭 Noch keine Antworten eingegangen. Ich behalte den Posteingang im Blick."
 
     gesamt = len(antworten)
-    mit_termin = termine(antworten)
-    positiv = [a for a in antworten if _ist_positiv(a) and not a.get("terminwunsch")]
+    sortiert = triage(antworten)
+    mit_termin = sortiert["bestaetigt"]
+    zu_pruefen = sortiert["pruefen"]
+    positiv = [
+        a for a in antworten
+        if _ist_positiv(a) and not a.get("terminwunsch")
+    ]
 
     zeilen: list[str] = []
     if mit_termin:
@@ -120,17 +138,24 @@ def antworten_bericht(antworten: list[dict]) -> str:
             f"📬 {gesamt} neue Antwort{'en' if gesamt != 1 else ''} eingegangen."
         )
 
-    # Terminwünsche zuerst, ausführlich
+    # Bestätigte Terminwünsche zuerst, ausführlich
     for a in mit_termin:
         grund = a.get("termin_grund") or "möchte einen Termin"
         zeilen.append(f"   🎯 {a.get('firma', 'Unbekannt')}: {grund}")
+
+    # Ehrlich: widersprüchliche Signale leise zur Prüfung, NICHT als Termin
+    for a in zu_pruefen:
+        zeilen.append(
+            f"   🔎 {a.get('firma', 'Unbekannt')}: Antwort prüfen "
+            "(kein eindeutiger Terminwunsch)."
+        )
 
     # Sonstige positive Signale knapp
     for a in positiv[:5]:
         klasse = a.get("klasse") or a.get("kategorie") or "positiv"
         zeilen.append(f"   👍 {a.get('firma', 'Unbekannt')}: {klasse}")
 
-    rest = gesamt - len(mit_termin) - len(positiv[:5])
+    rest = gesamt - len(mit_termin) - len(zu_pruefen) - len(positiv[:5])
     if rest > 0:
         zeilen.append(f"   … und {rest} weitere Antwort{'en' if rest != 1 else ''}.")
 

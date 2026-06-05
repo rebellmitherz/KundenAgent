@@ -304,4 +304,20 @@ Branding: Hermes → Rebellsystem ......... ✅ (commit 6b21cba, nur Sichtflaech
   Guardrail-Hinweise 'Hermes Prime/OpenClaw/Sandra' bewusst unveraendert)
 
 ALLE PHASEN A–E FERTIG. 322 Tests grün.
+
+PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
+  F0 Hygiene (bot.py cp1252-Fix + .claude/ ignorieren) ✅ (commit e1cd136)
+  F1 Signalwahrheit: Termin-Triage gegen Fehlalarme .... ✅ (+17 Tests)
+     - product/agent/signalqualitaet.py: Absage-Erkennung + termin_status()
+       (BESTAETIGT/PRUEFEN/KEIN), deterministisch + optionales LLM (Fallback).
+     - replies.termine() = nur bestätigte; neu pruef_termine(); Bericht zeigt
+       herabgestufte Signale ehrlich als "zur Prüfung".
+     - notifier: bestätigter Termin = Prio 1; widersprüchlich = Prio-2-Prüfmeldung.
+     - runner.pruef_termine(); bot /status zeigt geprüfte Termine statt roher.
+     - Belegt am realen Fehlalarm (artundweise "keinen Bedarf" → war Termin).
+  F2 Reply<->Funnel-Join reparieren ................... ⬜ (Opus 4.8 / mittel-high)
+  F3 Revenue-First-Sicht (eine Kennzeile) ............. ⬜ (Sonnet 4.6 / mittel)
+  F4 Branding + Lizenz-Secret härten .................. ⬜ (Sonnet 4.6 / niedrig)
+  F5 Mandantenfähigkeit (Pro-Kunde-Profile) ........... ⬜ (Opus 4.8 / high)
+  F6 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
 ```

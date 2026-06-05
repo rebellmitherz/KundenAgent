@@ -99,8 +99,8 @@ def _agent_status_text(runner: "AgentRunner") -> str:
         bericht = runner.funnel_bericht()
         laeufe  = runner.laeufe()
         am_tor  = [l for l in laeufe if l.get("status") == "wartet_auf_mensch"]
-        ant     = runner.antworten()
-        termine = [a for a in ant if a.get("terminwunsch")]
+        termine = runner.termin_signale()      # F1: nur bestätigte
+        zu_pruefen = runner.pruef_termine()    # F1: widersprüchliche, zur Prüfung
 
         zeilen = [bericht]
         if am_tor:
@@ -112,6 +112,11 @@ def _agent_status_text(runner: "AgentRunner") -> str:
             zeilen.append(
                 f"\n🎯 {len(termine)} Termin-Signal(e) in den Antworten — "
                 "schreib 'Antworten zeigen' für Details."
+            )
+        if zu_pruefen:
+            zeilen.append(
+                f"\n🔎 {len(zu_pruefen)} Antwort(en) zur Prüfung — "
+                "schreib 'Mail zeigen'."
             )
         return "\n".join(zeilen)
     except Exception:

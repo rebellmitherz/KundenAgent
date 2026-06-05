@@ -22,6 +22,7 @@ from product.agent.erledigt import ErledigtSpeicher
 from product.agent.funnel import funnel_aus_rohdaten, funnel_bericht
 from product.agent.memory import LaufSpeicher
 from product.agent.replies import antworten_bericht, termine
+from product.agent.replies import pruef_termine as _pruef_termine
 from product.agent.tools import AgentKontext
 from product.operator.order_schema import Auftrag, AuftragsStatus
 
@@ -190,8 +191,15 @@ class AgentRunner:
         return antworten_bericht(self.antworten(limit=limit))
 
     def termin_signale(self, limit: int = 30) -> list[dict]:
-        """Nur OFFENE Termin-Signale — erledigte werden ausgeblendet (Phase D)."""
+        """Nur OFFENE, **bestätigte** Termin-Signale — erledigte und durch die
+        Signalqualitäts-Triage herabgestufte Signale werden ausgeblendet (F1)."""
         return [a for a in termine(self.antworten(limit=limit)) if not a.get("erledigt")]
+
+    def pruef_termine(self, limit: int = 30) -> list[dict]:
+        """Offene Signale, die wie ein Termin markiert waren, dem Text nach aber
+        widersprüchlich sind (F1) — dem Menschen zur Prüfung, nie als sicherer
+        Termin."""
+        return [a for a in _pruef_termine(self.antworten(limit=limit)) if not a.get("erledigt")]
 
     def termin_abschliessen(self, firma_oder_key: str) -> dict:
         """Markiert einen Termin als erledigt (read-only zur Engine, agent-lokal).
