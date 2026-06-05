@@ -344,7 +344,10 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
      - PlattformWatcher: ein Watcher je aktivem Mandant, meldet NUR an dessen
        owner_chat_id — Test belegt: kein Querverkehr zwischen Kunden.
      - bot.py (Live-Entry) noch single-tenant; Multi-Mandanten-Verdrahtung in F7.
-  F5 Revenue-Reporting pro Mandant + Operator-Gesamtsicht ⬜ (Sonnet 4.6 / mittel)
+  F5 Revenue-Reporting pro Mandant + Operator-Gesamtsicht ✅ (+12 Tests)
+     - product/platform/reporting.py: mandant_report() (Termine bestätigt/prüfen,
+       Funnel, ohne-Bezug-Antworten) + plattform_report_text() Gesamtsicht,
+       sortiert nach Termin-Signalen. Hero-Metrik = geprüfte Termine, nicht Volumen.
      - Hero-Metrik: geprüfte Termine (F1) je Kunde; Cross-Mandanten-Übersicht.
   F6 Branding + Lizenz härten (Mandanten-Lizenz) ...... ⬜ (Sonnet 4.6 / niedrig)
   F7 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
