@@ -72,9 +72,10 @@ Engine-Aufruf: `python mine.py -i "<Branche>" -c "<Ort>" -n <Anzahl> --mode loca
 
 ---
 
-## 4. STAND — SCHRITTE 0–13 ALLE GRÜN ✅
+## 4. STAND — SCHRITTE 0–13 + PHASEN A–D + CLOSER ALLE GRÜN ✅
 
-Alles in `product/` (additiv, b2bbot/ClouseAgent unverändert). **121 Tests grün.**
+Alles in `product/` (additiv, b2bbot/ClouseAgent unverändert). **294 Tests grün.**
+(Schritte 0–13 = Produktschicht: 121 Tests; Phasen A–D + Closer = +173 Tests.)
 
 ```
 product/
@@ -130,8 +131,9 @@ product/agent/test_nachfassen.py       8   (Phase B.3 — Runner-Nachfassen)
 product/agent/test_funnel.py          21   (Phase C — Trichter + Kampagnen)
 product/bridge/test_kampagne.py        5   (Phase C — Rohdaten read-only)
 product/agent/test_notifier.py        13   (Phase D — Notifier + Watcher)
+product/telegram/test_closer_bot.py    8   (Closer — Telegram-Steuerung)
                                      ----
-                                     = 286 grün
+                                     = 294 grün
 ```
 
 WICHTIG (Engine-Sende-Modell, B.1): Ein echter SMTP-Versand feuert NUR mit
@@ -161,6 +163,8 @@ Was schon LÄUFT:
   geantwortet→termin, aus Pipeline+reply_queue; persistenter Verlauf/Trend
 - ✅ Push-Meldungen (D) — Watcher meldet Termin-Signale, offene Tore, Nachfassen
   fällig via Telegram; dedupliziert; kein Auto-Send
+- ✅ Closer (ClouseAgent) per Telegram steuerbar (`closer starten/stoppen/status`),
+  bei Termin-Signal automatisch erwähnt; eigenständig, NICHT im B2B-Fluss (§2)
 - ⬜ Versand-Abruf-Trigger (process-replies/IMAP) bewusst NICHT gebaut (siehe §4-Notiz)
 
 ---
@@ -275,4 +279,5 @@ B     Loops schließen (Send/Reply/Followup) ✅ FERTIG
   B.3 Nachfassen (human-gated followups) . ✅ (commit ffe7743, +14 Tests)
 C     Kampagnen-Gedächtnis ............... ✅ (commit c9198f9, +26 Tests)
 D     Tore + Push-Meldungen .............. ✅ (commit f09a2b2, +13 Tests)
+Closer Telegram-Steuerung ............... ✅ (commit cce0cdc, +8 Tests, 294 total)
 ```
