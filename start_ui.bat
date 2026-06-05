@@ -1,7 +1,5 @@
 @echo off
-:: Hermes Sales Operator — Mini-UI starten
-:: Oeffnet http://127.0.0.1:8767 im Browser
-
+:: Hermes Sales Operator — Mini-UI starten + Browser oeffnen
 setlocal
 cd /d "%~dp0"
 set PYTHONUTF8=1
@@ -13,7 +11,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Mini-UI startet auf http://127.0.0.1:8767 ...
-python product\ui\server.py
+echo Hermes UI startet auf http://127.0.0.1:8767 ...
+start /B python product\ui\server.py
 
-pause
+timeout /t 2 /nobreak >nul
+start http://127.0.0.1:8767
+
+echo Fenster offen lassen — Server laeuft im Hintergrund.
+echo Zum Beenden dieses Fenster schliessen.
+cmd /k
