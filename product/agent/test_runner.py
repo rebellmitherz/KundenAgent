@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -159,6 +160,52 @@ def t_kein_sende_werkzeug_im_verlauf(d):
     assert not (benutzte & SENDE_WERKZEUGE_GESPERRT), f"Sende-Werkzeug benutzt: {benutzte}"
 
 
+def _warte_status(runner, auftrags_id, ziel="wartet_auf_mensch", timeout=4.0):
+    ende = time.time() + timeout
+    while time.time() < ende:
+        rec = runner.lauf(auftrags_id)
+        if rec and rec.get("status") == ziel:
+            return rec
+        time.sleep(0.05)
+    return runner.lauf(auftrags_id)
+
+
+def t_hintergrund_legt_sofort_an(d):
+    """starten_im_hintergrund persistiert sofort einen Lauf-Datensatz + gibt id."""
+    a = _auftrag(anzahl=25)
+    runner = AgentRunner(SimulierteEngine(plan=[30], start=0), data_dir=d)
+    aid = runner.starten_im_hintergrund(a)
+    assert aid == a.auftrags_id
+    rec = runner.lauf(aid)
+    assert rec is not None                       # sofort sichtbar
+    assert rec["status"] in ("laeuft", "wartet_auf_mensch")
+    # Thread sauber auslaufen lassen, bevor das Temp-Verzeichnis gelöscht wird
+    _warte_status(runner, aid)
+
+
+def t_hintergrund_laeuft_zu_ende(d):
+    """Der Hintergrund-Thread führt den Agenten bis zum harten Tor + Callback."""
+    a = _auftrag(anzahl=25)
+    runner = AgentRunner(SimulierteEngine(plan=[30], start=0), data_dir=d)
+    gerufen = {}
+    def cb(erg):
+        gerufen["typ"] = erg.abschluss.typ
+    runner.starten_im_hintergrund(a, fertig_callback=cb)
+    rec = _warte_status(runner, a.auftrags_id)
+    assert rec["status"] == "wartet_auf_mensch"
+    assert gerufen.get("typ") == Aktionstyp.MENSCH_FRAGEN
+
+
+def t_hintergrund_entwurf_wird_bestaetigt(d):
+    """Ein Entwurf (nicht bestätigt) wird vor dem Lauf automatisch bestätigt."""
+    a = Auftrag(zielgruppe="Coaches", region="Berlin", lead_anzahl=10, angebot="X")
+    # NICHT bestätigt → starten_im_hintergrund muss das selbst tun
+    runner = AgentRunner(SimulierteEngine(plan=[30], start=0), data_dir=d)
+    aid = runner.starten_im_hintergrund(a)
+    rec = _warte_status(runner, aid)
+    assert rec is not None and rec["status"] == "wartet_auf_mensch"
+
+
 # ─── Haupt-Runner ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -171,6 +218,9 @@ if __name__ == "__main__":
     test("mehrere Läufe isoliert", t_mehrere_laeufe_isoliert)
     test("ohne Key + ohne Reporter lauffähig", t_ohne_key_ohne_reporter_laeuft)
     test("kein Sende-Werkzeug im Verlauf", t_kein_sende_werkzeug_im_verlauf)
+    test("Hintergrund: legt sofort an + id", t_hintergrund_legt_sofort_an)
+    test("Hintergrund: läuft bis Mensch-Tor + Callback", t_hintergrund_laeuft_zu_ende)
+    test("Hintergrund: Entwurf wird bestätigt", t_hintergrund_entwurf_wird_bestaetigt)
 
     print(f"\n{'=' * 40}")
     gesamt = _ok + _fail

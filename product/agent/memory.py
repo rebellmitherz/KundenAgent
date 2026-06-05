@@ -127,6 +127,16 @@ class LaufSpeicher:
 
     # ----------------------------------------------------------------- Lesen (für UI/Telegram, A.5)
 
+    def lauf_anlegen(self, auftrag: Auftrag) -> None:
+        """Legt sofort einen 'laeuft'-Datensatz an (falls noch nicht vorhanden).
+
+        Damit erscheint ein gerade gestarteter Lauf unmittelbar in der Übersicht,
+        noch bevor der erste Agent-Schritt geschrieben wird (für die UI-Anzeige)."""
+        pfad = self._pfad(auftrag.auftrags_id)
+        if pfad.exists():
+            return
+        self._schreiben(auftrag.auftrags_id, self._neuer_record(auftrag))
+
     def lesen(self, auftrags_id: str) -> Optional[dict]:
         """Liest den vollständigen Datensatz eines Auftrags. None wenn unbekannt."""
         pfad = self._pfad(auftrags_id)

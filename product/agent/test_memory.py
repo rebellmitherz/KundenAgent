@@ -313,6 +313,29 @@ def t_integration_kein_lead_rohdaten(d):
     assert "@" not in roh, "Möglicher E-Mail-Leak im Lauf-Speicher"
 
 
+def t_lauf_anlegen_sofort(d):
+    """lauf_anlegen schreibt sofort einen 'laeuft'-Datensatz (für UI-Sofortanzeige)."""
+    sp = LaufSpeicher(d)
+    a = _auftrag(anzahl=25)
+    assert sp.lesen(a.auftrags_id) is None
+    sp.lauf_anlegen(a)
+    rec = sp.lesen(a.auftrags_id)
+    assert rec is not None
+    assert rec["status"] == "laeuft"
+    assert rec["auftrag"]["zielgruppe"] == "Handwerker"
+    assert rec["schritte"] == []
+
+
+def t_lauf_anlegen_ueberschreibt_nicht(d):
+    """Ein vorhandener Lauf wird durch lauf_anlegen nicht überschrieben."""
+    sp = LaufSpeicher(d)
+    a = _auftrag(anzahl=25)
+    sp.aufzeichnen(a, _schritt(), _lage())           # 1 Schritt vorhanden
+    sp.lauf_anlegen(a)                                # darf nicht platt machen
+    rec = sp.lesen(a.auftrags_id)
+    assert len(rec["schritte"]) == 1
+
+
 # ─── Haupt-Runner ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -335,6 +358,10 @@ if __name__ == "__main__":
     test("korrupte Datei → neu, kein Crash", t_korrupte_datei_neu_kein_crash)
     test("atomar — kein .tmp übrig", t_atomar_kein_tmp_uebrig)
     test("zwei Aufträge isoliert", t_zwei_auftraege_isoliert)
+
+    print("\n── lauf_anlegen (UI-Sofortanzeige) ──")
+    test("legt sofort 'laeuft' an", t_lauf_anlegen_sofort)
+    test("überschreibt vorhandenen Lauf nicht", t_lauf_anlegen_ueberschreibt_nicht)
 
     print("\n── Lesen ──")
     test("unbekannt → None/leer", t_lesen_unbekannt_none)

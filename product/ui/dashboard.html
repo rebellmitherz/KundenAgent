@@ -679,6 +679,59 @@ html, body {
 .freigabe-btn:active { transform: translateY(0); }
 .freigabe-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
+/* ─── Antworten ──────────────────────────────────────────────────────── */
+.antwort-summary {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px; margin-bottom: 16px;
+  color: var(--text1); font-size: 14px; line-height: 1.6; white-space: pre-wrap;
+}
+.antwort-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px;
+  position: relative;
+}
+.antwort-card.termin { border-color: rgba(0,230,118,0.35); }
+.antwort-card.auto   { opacity: 0.62; }
+.antwort-firma { font-size: 15px; font-weight: 700; color: var(--text1); margin-bottom: 4px; }
+.antwort-meta  { font-size: 12px; color: var(--text2); margin-bottom: 2px; }
+.antwort-meta b { color: var(--text1); font-weight: 600; }
+.antwort-text {
+  margin-top: 10px; padding: 10px 12px; background: var(--bg2);
+  border-radius: var(--radius-sm); font-size: 13px; color: var(--text1);
+  line-height: 1.55; white-space: pre-wrap; max-height: 220px; overflow: auto;
+}
+.antwort-badge {
+  display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px;
+  border-radius: 999px; margin-left: 8px; vertical-align: middle;
+}
+.badge-termin { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.3); }
+.badge-auto   { background: var(--bg2); color: var(--text3); border: 1px solid var(--border); }
+.antwort-close-btn {
+  margin-top: 12px; padding: 8px 16px; background: var(--green-dim);
+  border: 1px solid rgba(0,230,118,0.35); border-radius: var(--radius-sm);
+  color: var(--green); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s;
+}
+.antwort-close-btn:hover { opacity: 0.8; }
+.antwort-close-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ─── Funnel / Kampagne ──────────────────────────────────────────────── */
+.funnel-wrap { background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; }
+.funnel-title { font-size: 15px; font-weight: 700; color: var(--text1); margin-bottom: 16px; }
+.funnel-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.funnel-label { width: 150px; font-size: 13px; color: var(--text2); flex-shrink: 0; }
+.funnel-bar-bg { flex: 1; height: 22px; background: var(--bg2); border-radius: 6px; overflow: hidden; }
+.funnel-bar { height: 100%; background: linear-gradient(90deg, #005f8a, var(--cyan));
+  border-radius: 6px; transition: width 0.5s; min-width: 2px; }
+.funnel-bar.termin { background: linear-gradient(90deg, #00794d, var(--green)); }
+.funnel-num { width: 44px; text-align: right; font-size: 14px; font-weight: 700; color: var(--text1); }
+.kampagne-lauf { background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.kampagne-lauf-ziel { font-size: 14px; color: var(--text1); font-weight: 600; }
+.kampagne-lauf-sub { font-size: 12px; color: var(--text2); margin-top: 3px; }
+
 /* ─── Modal ──────────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
@@ -991,9 +1044,12 @@ html, body {
   <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" data-view="status">Status</div>
+    <div class="tab" data-view="kampagne" id="tab-kampagne">Kampagne</div>
+    <div class="tab" data-view="antworten" id="tab-antworten">Antworten</div>
     <div class="tab" data-view="leads">Leads</div>
     <div class="tab" data-view="vorschau">Mail-Vorschau</div>
     <div class="tab" data-view="freigabe">Freigabe</div>
+    <div class="tab" data-view="auftrag" id="tab-auftrag">Neuer Auftrag</div>
     <div class="tab" data-view="closer" id="tab-closer">Closer</div>
     <div class="tab" data-view="setup" id="tab-setup">Einrichtung</div>
   </div>
@@ -1023,6 +1079,21 @@ html, body {
     <!-- Freigabe View -->
     <div class="view" id="view-freigabe">
       <div id="freigabeContent"></div>
+    </div>
+
+    <!-- Kampagne / Trichter View -->
+    <div class="view" id="view-kampagne">
+      <div id="kampagneContent"></div>
+    </div>
+
+    <!-- Antworten View -->
+    <div class="view" id="view-antworten">
+      <div id="antwortenContent"></div>
+    </div>
+
+    <!-- Neuer Auftrag View -->
+    <div class="view" id="view-auftrag">
+      <div id="auftragContent"></div>
     </div>
 
     <!-- Leads View -->
@@ -1462,6 +1533,224 @@ function _adminHeaders(extra) {
   const t = _adminToken();
   if (t) h['X-Access-Token'] = t;
   return h;
+}
+
+// ─── Agent: Antworten / Kampagne / Neuer Auftrag ───────────────────────────
+document.getElementById('tab-antworten').addEventListener('click', ladenAntworten);
+document.getElementById('tab-kampagne').addEventListener('click', ladenKampagne);
+document.getElementById('tab-auftrag').addEventListener('click', renderAuftragForm);
+
+// --- Antworten ---
+async function ladenAntworten() {
+  const el = document.getElementById('antwortenContent');
+  el.innerHTML = emptyState('⏳', 'Lade Antworten…', '');
+  try {
+    const r = await fetch('/api/agent/antworten', { headers: _adminHeaders({'Content-Type': undefined}) });
+    const d = await r.json();
+    renderAntworten(d);
+  } catch (e) {
+    el.innerHTML = emptyState('📭', 'Keine Antworten verfügbar', String(e));
+  }
+}
+
+function renderAntworten(d) {
+  const el = document.getElementById('antwortenContent');
+  const liste = (d && d.antworten) || [];
+  if (!liste.length) {
+    el.innerHTML = emptyState('📭', 'Noch keine Antworten',
+      'Sobald jemand auf eine Kampagne antwortet, erscheint sie hier.');
+    return;
+  }
+  // Echte Antworten zuerst, Auto-Antworten ans Ende
+  const echte = liste.filter(a => !a.auto_antwort);
+  const autos = liste.filter(a => a.auto_antwort);
+  const geordnet = echte.concat(autos);
+
+  let html = '';
+  if (d.bericht) html += `<div class="antwort-summary">${esc(d.bericht)}</div>`;
+
+  for (const a of geordnet) {
+    const termin = a.terminwunsch && !a.erledigt;
+    const cls = 'antwort-card' + (termin ? ' termin' : '') + (a.auto_antwort ? ' auto' : '');
+    let badge = '';
+    if (termin) badge = `<span class="antwort-badge badge-termin">🎯 Termin</span>`;
+    else if (a.erledigt) badge = `<span class="antwort-badge badge-auto">✓ erledigt</span>`;
+    else if (a.auto_antwort) badge = `<span class="antwort-badge badge-auto">automatisch</span>`;
+
+    const datum = _datumKurz(a.gesendet_am);
+    let aufMail = '';
+    if (datum) aufMail = `Auf Mail vom <b>${esc(datum)}</b>` + (a.postfach ? ` (${esc(a.postfach)})` : '');
+    else if (a.postfach) aufMail = `Postfach: <b>${esc(a.postfach)}</b>`;
+
+    html += `
+      <div class="${cls}">
+        <div class="antwort-firma">${esc(a.firma || 'Unbekannt')}${badge}</div>
+        ${a.von ? `<div class="antwort-meta">Von: <b>${esc(a.von)}</b></div>` : ''}
+        ${a.betreff ? `<div class="antwort-meta">Betreff: ${esc(a.betreff)}</div>` : ''}
+        ${aufMail ? `<div class="antwort-meta">${aufMail}</div>` : ''}
+        ${a.auszug ? `<div class="antwort-text">${esc(a.auszug)}</div>` : ''}
+        ${termin ? `<button class="antwort-close-btn" onclick="terminAbschliessen('${esc(a.firma)}', this)">✅ Termin abschließen</button>` : ''}
+      </div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function terminAbschliessen(firma, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳…'; }
+  try {
+    const r = await fetch('/api/agent/termin-abschliessen', {
+      method: 'POST', headers: _adminHeaders(),
+      body: JSON.stringify({ firma }),
+    });
+    const d = await r.json();
+    if (d.ok) { ladenAntworten(); }
+    else if (btn) { btn.disabled = false; btn.textContent = '✅ Termin abschließen'; alert(d.meldung || 'Fehler'); }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Termin abschließen'; }
+  }
+}
+
+// --- Kampagne / Trichter ---
+const _FUNNEL_STUFEN = [
+  ['gefunden', '🔍 gefunden'], ['bereit', '✅ versandbereit'],
+  ['angeschrieben', '📧 angeschrieben'], ['geantwortet', '💬 geantwortet'],
+  ['termin', '🎯 Termine'],
+];
+
+async function ladenKampagne() {
+  const el = document.getElementById('kampagneContent');
+  el.innerHTML = emptyState('⏳', 'Lade Kampagne…', '');
+  try {
+    const [rf, rl] = await Promise.all([
+      fetch('/api/agent/funnel', { headers: _adminHeaders({'Content-Type': undefined}) }),
+      fetch('/api/agent/laeufe', { headers: _adminHeaders({'Content-Type': undefined}) }),
+    ]);
+    renderKampagne(await rf.json(), await rl.json());
+  } catch (e) {
+    el.innerHTML = emptyState('📊', 'Keine Kampagnendaten', String(e));
+  }
+}
+
+function renderKampagne(funnelData, laeufeData) {
+  const el = document.getElementById('kampagneContent');
+  const funnel = (funnelData && funnelData.funnel) || { gesamt: 0, stufen: {} };
+  const stufen = funnel.stufen || {};
+  const gesamt = funnel.gesamt || 0;
+  const max = Math.max(1, ...Object.values(stufen).map(v => v || 0));
+
+  let html = `<div class="funnel-wrap">
+    <div class="funnel-title">Kampagnen-Trichter — ${gesamt} Lead${gesamt !== 1 ? 's' : ''} gesamt</div>`;
+  if (gesamt === 0) {
+    html += `<div class="antwort-meta">Noch keine Leads. Starte einen Auftrag im Tab „Neuer Auftrag".</div>`;
+  } else {
+    for (const [key, label] of _FUNNEL_STUFEN) {
+      const n = stufen[key] || 0;
+      const pct = Math.round((n / max) * 100);
+      html += `
+        <div class="funnel-row">
+          <div class="funnel-label">${label}</div>
+          <div class="funnel-bar-bg"><div class="funnel-bar ${key === 'termin' ? 'termin' : ''}" style="width:${pct}%"></div></div>
+          <div class="funnel-num">${n}</div>
+        </div>`;
+    }
+  }
+  html += `</div>`;
+
+  // Laufende / abgeschlossene Kampagnen
+  const laeufe = (laeufeData && laeufeData.laeufe) || [];
+  if (laeufe.length) {
+    html += `<div class="funnel-title" style="margin:18px 0 10px">Kampagnen-Läufe</div>`;
+    for (const l of laeufe) {
+      const a = l.auftrag || {};
+      const f = l.funnel || {};
+      const statusMap = {
+        laeuft: ['tag-cyan', '🔄 läuft'], wartet_auf_mensch: ['tag-amber', '⏸ wartet auf Freigabe'],
+        gesendet: ['tag-green', '✉️ gesendet'], abgeschlossen: ['tag-green', '✓ abgeschlossen'],
+        nachgefasst: ['tag-green', '↻ nachgefasst'], aufgegeben: ['tag-amber', '⚠ gestoppt'],
+      };
+      const [tcls, ttxt] = statusMap[l.status] || ['tag-cyan', l.status || '—'];
+      html += `
+        <div class="kampagne-lauf">
+          <div>
+            <div class="kampagne-lauf-ziel">${esc(a.zielgruppe || '—')} · ${esc(a.region || '—')}</div>
+            <div class="kampagne-lauf-sub">${f.sendbar || 0}/${a.lead_anzahl || f.ziel || 0} versandbereit · ${l.schritte_anzahl || 0} Schritte</div>
+          </div>
+          <span class="tag ${tcls}">${ttxt}</span>
+        </div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+// --- Neuer Auftrag ---
+function renderAuftragForm() {
+  const el = document.getElementById('auftragContent');
+  el.innerHTML = `
+    <div class="setup-section">
+      <div class="setup-hint">
+        🎯 Gib dein Ziel ein — der Agent sucht, füllt bei Lücken selbst nach und
+        <strong>stoppt am harten Tor</strong> (Senden bestätigst nur du).
+      </div>
+      <div class="setup-h2" style="margin-top:0">Neue Kampagne starten</div>
+      <div id="auftragMsg"></div>
+      <form id="formAuftrag" onsubmit="auftragStarten(event)">
+        <div class="setup-form-row">
+          <label class="setup-label">Zielgruppe / Branche</label>
+          <input type="text" class="setup-input" id="auf_zielgruppe" placeholder="z. B. Handwerker, IT-Dienstleister" required>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Region / Ort</label>
+          <input type="text" class="setup-input" id="auf_region" placeholder="z. B. Köln, NRW" required>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Lead-Anzahl (Ziel)</label>
+          <input type="number" class="setup-input" id="auf_anzahl" value="20" min="1" required>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Dein Angebot (optional)</label>
+          <input type="text" class="setup-input" id="auf_angebot" placeholder="z. B. Webseiten, SEO">
+        </div>
+        <button type="submit" class="setup-btn" id="btnAuftrag">→ Kampagne starten</button>
+      </form>
+    </div>`;
+}
+
+async function auftragStarten(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnAuftrag');
+  const msg = document.getElementById('auftragMsg');
+  btn.disabled = true; btn.textContent = '⏳ Startet…';
+  const body = {
+    zielgruppe: document.getElementById('auf_zielgruppe').value.trim(),
+    region:     document.getElementById('auf_region').value.trim(),
+    anzahl:     parseInt(document.getElementById('auf_anzahl').value, 10) || 0,
+    angebot:    document.getElementById('auf_angebot').value.trim(),
+  };
+  try {
+    const r = await fetch('/api/agent/auftrag', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.innerHTML = `<div class="freigabe-result ok" style="display:block">✅ ${esc(d.meldung)}<br>Der Agent arbeitet jetzt im Hintergrund — schau im Tab „Kampagne" zu.</div>`;
+      btn.textContent = '✓ Gestartet';
+      document.getElementById('formAuftrag').reset();
+    } else {
+      msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ ${esc(d.meldung)}</div>`;
+      btn.disabled = false; btn.textContent = '→ Kampagne starten';
+    }
+  } catch (e) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">Verbindungsfehler: ${esc(String(e))}</div>`;
+    btn.disabled = false; btn.textContent = '→ Kampagne starten';
+  }
+}
+
+function _datumKurz(wert) {
+  wert = (wert || '').trim();
+  if (wert.length >= 10 && wert[4] === '-' && wert[7] === '-') {
+    return wert.slice(8,10) + '.' + wert.slice(5,7) + '.' + wert.slice(0,4);
+  }
+  return wert;
 }
 
 // ─── Setup Tab ────────────────────────────────────────────────────────────

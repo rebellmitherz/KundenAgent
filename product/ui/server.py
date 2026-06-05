@@ -23,6 +23,7 @@ sys.path.insert(0, str(_PRODUCT_ROOT))
 
 from product.agent.runner import AgentRunner
 from product.bridge.engine_bridge import EngineBridge, EngineError
+from product.operator.order_schema import Auftrag
 from product.closer.closer_adapter import CloserAdapter
 from product.licensing.features import Feature
 from product.licensing.license import LizenzDaten, feature_erlaubt
@@ -50,7 +51,8 @@ _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
 _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
-                     "/api/agent/nachfassen",
+                     "/api/agent/nachfassen", "/api/agent/auftrag",
+                     "/api/agent/termin-abschliessen",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
@@ -149,6 +151,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_feature_aktiv(Feature.FREIGABE):
                 self._403_feature(Feature.FREIGABE); return
             self._handle_agent_nachfassen()
+        elif self.path == "/api/agent/auftrag":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_agent_auftrag()
+        elif self.path == "/api/agent/termin-abschliessen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_agent_termin_abschliessen()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
                 self._403(); return
@@ -294,6 +304,76 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             ergebnis = _agent_runner.nachfassen(auftrags_id, limit=limit, bestaetigt=True)
             self._json(ergebnis)
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_agent_auftrag(self):
+        """POST /api/agent/auftrag — startet eine Lead-Kampagne aus der UI.
+
+        Body: {zielgruppe, region, anzahl, angebot}. Der Agent läuft asynchron
+        (Hintergrund-Thread), sucht und füllt selbst auf, STOPPT am harten Tor
+        (Senden = Mensch). Antwort: {ok, auftrags_id}.
+        """
+        import json as _json
+        d = {}
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+        except Exception:
+            pass
+
+        zielgruppe = str(d.get("zielgruppe", "")).strip()
+        region = str(d.get("region", "")).strip()
+        angebot = str(d.get("angebot", "")).strip()
+        try:
+            anzahl = int(d.get("anzahl", 0))
+        except (TypeError, ValueError):
+            anzahl = 0
+
+        if not zielgruppe or not region:
+            self._json({"ok": False, "meldung": "Zielgruppe und Region sind Pflicht."})
+            return
+        if anzahl <= 0:
+            self._json({"ok": False, "meldung": "Bitte eine Lead-Anzahl > 0 angeben."})
+            return
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+
+        try:
+            auftrag = Auftrag(
+                zielgruppe=zielgruppe, region=region,
+                lead_anzahl=anzahl, angebot=angebot or "—",
+            )
+            auftrags_id = _agent_runner.starten_im_hintergrund(auftrag)
+            self._json({
+                "ok": True,
+                "auftrags_id": auftrags_id,
+                "meldung": f"Kampagne gestartet: {zielgruppe} · {region} · {anzahl} Leads.",
+            })
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_agent_termin_abschliessen(self):
+        """POST /api/agent/termin-abschliessen — Termin als erledigt markieren.
+
+        Body: {firma}. Agent-lokal (Engine unberührt). Antwort: {ok, meldung}.
+        """
+        import json as _json
+        firma = ""
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+                firma = str(d.get("firma", "")).strip()
+        except Exception:
+            pass
+        if not _agent_runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        try:
+            self._json(_agent_runner.termin_abschliessen(firma))
         except Exception as e:
             self._json({"ok": False, "meldung": str(e)})
 

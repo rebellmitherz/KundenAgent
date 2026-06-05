@@ -12,8 +12,9 @@ fügt keine Sende-Pfade hinzu.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from product.agent.brain import Brain, Laufergebnis, baue_brain
 from product.agent.campaign import KampagnenSpeicher
@@ -61,6 +62,31 @@ class AgentRunner:
         """
         brain = self._baue_brain(auftrag)
         return brain.fuehre_aus()
+
+    def starten_im_hintergrund(
+        self, auftrag: Auftrag, fertig_callback: Optional[Callable[[Laufergebnis], None]] = None
+    ) -> str:
+        """Startet einen Auftrag asynchron (für die Mini-UI).
+
+        Persistiert sofort einen 'laeuft'-Datensatz (damit die UI den Lauf direkt
+        sieht) und führt den Agenten in einem Daemon-Thread aus. Gibt die
+        auftrags_id zurück. Der Agent sendet NIE selbst — er stoppt am harten Tor.
+        """
+        if auftrag.status == AuftragsStatus.ENTWURF:
+            auftrag.bestaetigen()
+        self._speicher.lauf_anlegen(auftrag)
+
+        def _arbeit() -> None:
+            try:
+                ergebnis = self._baue_brain(auftrag).fuehre_aus()
+                if fertig_callback:
+                    fertig_callback(ergebnis)
+            except Exception:
+                # Absturzsicher: der 'laeuft'-Datensatz bleibt, Fehler verschluckt.
+                pass
+
+        threading.Thread(target=_arbeit, daemon=True).start()
+        return auftrag.auftrags_id
 
     def _baue_brain(self, auftrag: Auftrag) -> Brain:
         kontext = AgentKontext(
