@@ -294,6 +294,35 @@ def _owner_registrieren(cfg, chat_id: str) -> None:
         print(f"[bot] Owner konnte nicht gespeichert werden: {e}")
 
 
+def baue_mandant_sitzung(
+    plattform: "Plattform", mandant, send_fn, *, api_key_default: str = ""
+) -> "Optional[Sitzung]":
+    """Baut für einen Mandanten eine isolierte Laufzeit (eigener Dialog auf seiner
+    eigenen Bridge + seinem eigenen Runner). Kein Querverkehr zwischen Mandanten.
+
+    Auf Modulebene (statt in main()), damit der End-to-End-Smoke-Test exakt
+    denselben Produktionspfad prüft. Gibt eine nicht-betriebsbereite Sitzung
+    zurück, wenn die Engine des Mandanten (noch) nicht baubar ist."""
+    runner = plattform.runner_oder_none(mandant.mandant_id)
+    if runner is None:
+        return Sitzung(name=mandant.name, betriebsbereit=False)
+    orders_dir = plattform.register.data_dir_fuer(mandant.mandant_id) / "orders"
+    try:
+        orders_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    m_llm = build_anthropic_llm(mandant.anthropic_api_key or api_key_default or None)
+    m_mgr = DialogManager(
+        intake=OperatorIntake(llm_fn=m_llm),
+        gate=ConfirmGate(),
+        bridge=runner.bridge,
+        orders_dir=orders_dir,
+        send_fn=send_fn,
+        agent_runner=runner,
+    )
+    return Sitzung(runner=runner, mgr=m_mgr, name=mandant.name, betriebsbereit=True)
+
+
 def main() -> None:
     _lock_pruefen()
 
@@ -347,37 +376,15 @@ def main() -> None:
     )
     aktive = register.alle(nur_aktive=True)
 
-    def _mandant_sitzung(mandant) -> "Optional[Sitzung]":
-        """Baut für einen Mandanten eine isolierte Laufzeit (eigener Dialog auf
-        seiner eigenen Bridge + seinem eigenen Runner). Kein Querverkehr."""
-        runner = plattform.runner_oder_none(mandant.mandant_id)
-        if runner is None:
-            return Sitzung(name=mandant.name, betriebsbereit=False)
-        orders_dir = plattform.register.data_dir_fuer(mandant.mandant_id) / "orders"
-        try:
-            orders_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        m_llm = build_anthropic_llm(
-            mandant.anthropic_api_key or cfg.anthropic_api_key or None
-        )
-        m_mgr = DialogManager(
-            intake=OperatorIntake(llm_fn=m_llm),
-            gate=ConfirmGate(),
-            bridge=runner.bridge,
-            orders_dir=orders_dir,
-            send_fn=send_fn,
-            agent_runner=runner,
-        )
-        return Sitzung(runner=runner, mgr=m_mgr, name=mandant.name, betriebsbereit=True)
-
     if aktive:
         # === MULTI-TENANT: jeder Kunde ein isolierter Agent ===
         print(f"[bot] Plattform-Modus: {len(aktive)} aktive(r) Mandant(en).")
         router = Router(
             plattform=plattform,
             operator_chat_id=cfg.owner_chat_id,
-            sitzung_factory=_mandant_sitzung,
+            sitzung_factory=lambda m: baue_mandant_sitzung(
+                plattform, m, send_fn, api_key_default=cfg.anthropic_api_key or ""
+            ),
         )
         watcher = PlattformWatcher(
             plattform, send_fn, intervall_sek=300, auto_abruf=True

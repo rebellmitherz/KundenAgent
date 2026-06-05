@@ -393,13 +393,27 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        - Toter 'import shutil' in package.py entfernt.
        - Cache-Bug (nicht-bereite Sitzung dauerhaft gecacht) bereits F7a-Fix.
     F7d Findings fixen ............................... ✅ (in F7c integriert)
+    F7e Abschluss-Politur (Betreiber-Reife) ......... ✅ (+7 E2E-Tests)
+       - product/DEPLOYMENT.md: Betreiber-Deployment-Anleitung (Single-/Multi-
+         Tenant, Lizenz-Secret, Mandant anlegen, Pakete, Backup, Go-Live-Check).
+       - product/STRATEGIE.md: Produkt-/Vertriebsstrategie schriftlich —
+         Managed SaaS jetzt; Hybrid (Portal/Connector, Enterprise/Self-Hosted)
+         bewusst OFFEN gehalten, nicht verbaut.
+       - bot.baue_mandant_sitzung() auf Modulebene ausgelagert (kleine, saubere
+         Extraktion) → der E2E-Smoke prüft den ECHTEN Produktionspfad.
+       - product/telegram/test_e2e_smoke.py: echte Kette (Register→Plattform→
+         Factory→Router→Dispatch), nur Engine/Telegram gefakt. Belegt Isolation
+         (Chat A sieht NUR A's Daten), Ablehnung, Betreiber-Gesamtsicht,
+         Single-Tenant. 7/7 grün.
 
-PHASE F7 ABGESCHLOSSEN. 27 Suiten, 0 rot.
-Stand: ae6009b — alle 4 Commits gepusht (User).
+PHASE F7 KOMPLETT ABGESCHLOSSEN. 28 Suiten, 0 rot.
+Produkt ist betreiber-reif: Multi-Mandanten-Plattform, signal-first,
+human-gated, gebrandet, SaaS-sicher paketiert, dokumentiert, E2E-verifiziert.
 
-NÄCHSTE PHASE:
-  F8 Kunden-Frontend / Connector .................. ⬜ (wenn SaaS-Betrieb läuft)
+NÄCHSTE PHASE (erst nach Produkt-/Vertriebsentscheidung + Design-Vorschlag):
+  F8 Kunden-Frontend / Connector .................. ⬜
      - Echtes Kunden-UI (ohne Betreiber-Dashboard/Setup/Engine-Felder)
      - API/Connector zwischen Kunden-UI und isolierter Mandanten-Laufzeit
-     - Empfohlen: Opus / High wenn bereit
+     - Siehe product/STRATEGIE.md. Empfohlen: Opus / High wenn bereit
+     - WICHTIG: Vor F8 zuerst Design-Vorschlag, NICHT drauflosbauen.
 ```
