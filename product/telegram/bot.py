@@ -40,8 +40,12 @@ from product.operator.confirm import ConfirmGate
 from product.operator.intake import OperatorIntake
 from product.operator.llm_anthropic import build_anthropic_llm
 from product.operator.reporter import Reporter
+from product.platform.mandant import MandantenRegister
+from product.platform.plattform import Plattform, PlattformWatcher
+from product.platform.reporting import plattform_report_text
 from product.telegram.config import laden as config_laden
 from product.telegram.dialog import DialogManager
+from product.telegram.routing import Router, Sitzung
 
 _LOCK_DATEI = Path(__file__).parent / "operator.lock"
 
@@ -124,9 +128,9 @@ def _agent_status_text(runner: "AgentRunner") -> str:
 
 
 def _verarbeite_update(
-    upd: dict, tg: TelegramAPI, cfg, mgr: DialogManager,
-    agent_runner: "AgentRunner",
+    upd: dict, tg: TelegramAPI, cfg, router: Router,
     closer: "CloserAdapter",
+    plattform: "Optional[Plattform]" = None,
 ) -> None:
     msg = upd.get("message") or upd.get("edited_message")
     if not msg:
@@ -137,17 +141,34 @@ def _verarbeite_update(
     if not text:
         return
 
-    # Owner-Lock: nur der konfigurierte Besitzer darf den Bot bedienen
-    if cfg.owner_chat_id and chat_id != cfg.owner_chat_id:
-        tg.try_send(chat_id, "Dieser Bot ist privat.")
+    low = text.lower()
+
+    # --- Zugang/Routing: welche Mandanten-Laufzeit bedient diese Chat-ID? ---
+    zugang = router.aufloesen(chat_id)
+
+    # Operator-Gesamtsicht (nur Betreiber, sinnvoll im Plattform-Modus) — VOR der
+    # Ablehnung, damit ein reiner Betreiber-Chat (ohne eigenen Mandanten) sie nutzt.
+    if zugang.ist_operator and low == "/plattform":
+        if plattform is not None:
+            tg.try_send(chat_id, plattform_report_text(plattform))
+        else:
+            tg.try_send(chat_id, "📋 Keine aktiven Mandanten registriert.")
         return
 
-    # Einmalige Owner-Registrierung (erster Start ohne owner_chat_id in Config)
-    if not cfg.owner_chat_id:
-        _owner_registrieren(cfg, chat_id)
+    if zugang.sitzung is None:
+        # Nicht bedienbar: höflich ablehnen — fremde Chat-IDs werden NIE bedient.
+        if zugang.ablehnung:
+            tg.try_send(chat_id, zugang.ablehnung)
+        elif zugang.ist_operator:
+            tg.try_send(chat_id,
+                "Betreiber-Modus aktiv. Schreib '/plattform' für die Gesamtsicht.")
+        return
+
+    # Ab hier bedienen wir genau DIESE Mandanten-Laufzeit (kein Querverkehr).
+    runner = zugang.sitzung.runner
+    mgr    = zugang.sitzung.mgr
 
     # --- Systemkommandos ---
-    low = text.lower()
     if low in ("/start", "/hilfe", "/help"):
         tg.try_send(chat_id, HILFE_TEXT)
         return
@@ -155,13 +176,13 @@ def _verarbeite_update(
     if low == "/status":
         # Dialog-Zustand + Agent-Überblick (Trichter + offene Tore + Antworten)
         dialog_status = mgr.status_text(chat_id)
-        agent_status  = _agent_status_text(agent_runner)
+        agent_status  = _agent_status_text(runner)
         tg.try_send(chat_id, dialog_status + "\n\n" + agent_status)
         return
 
     # Natürliche Statusabfragen
     if any(w in low for w in ("wo stehen", "kampagne", "trichter", "wie viele", "überblick")):
-        tg.try_send(chat_id, _agent_status_text(agent_runner))
+        tg.try_send(chat_id, _agent_status_text(runner))
         return
 
     # Termin abschließen — MUSS vor den allgemeinen Termin-/Antwort-Handlern stehen
@@ -171,7 +192,7 @@ def _verarbeite_update(
         for w in ("termin abschließen", "termin abschliessen", "termin erledigt",
                   "abschließen", "abschliessen", "termin"):
             rest = rest.replace(w, "")
-        erg = agent_runner.termin_abschliessen(rest.strip())
+        erg = runner.termin_abschliessen(rest.strip())
         tg.try_send(chat_id, erg.get("meldung", "Erledigt."))
         return
 
@@ -179,9 +200,9 @@ def _verarbeite_update(
     if any(w in low for w in ("antworten abrufen", "postfach prüfen", "postfach pruefen",
                                "post abrufen", "mails abrufen", "neue antworten")):
         tg.try_send(chat_id, "📥 Ich prüfe das Postfach…")
-        erg = agent_runner.antworten_abrufen()
+        erg = runner.antworten_abrufen()
         if erg.get("ok"):
-            tg.try_send(chat_id, f"✅ {erg.get('meldung','Abruf fertig.')}\n\n{agent_runner.antworten_bericht()}")
+            tg.try_send(chat_id, f"✅ {erg.get('meldung','Abruf fertig.')}\n\n{runner.antworten_bericht()}")
         else:
             tg.try_send(chat_id, f"⚠️ {erg.get('meldung','Abruf nicht möglich.')}")
         return
@@ -190,21 +211,21 @@ def _verarbeite_update(
     if any(w in low for w in ("mail zeigen", "mails zeigen", "antwort details",
                                "ganze antwort", "volle antwort", "alle antworten zeigen",
                                "details zeigen")):
-        tg.try_send(chat_id, antwort_detail_bericht(agent_runner.antworten()))
+        tg.try_send(chat_id, antwort_detail_bericht(runner.antworten()))
         return
 
     # Termin-Details aufbereiten
     if any(w in low for w in ("termin", "aufbereiten", "terminanfrage")):
-        tg.try_send(chat_id, termin_detail_bericht(agent_runner.antworten()))
+        tg.try_send(chat_id, termin_detail_bericht(runner.antworten()))
         return
 
     # Antworten-Überblick (Zusammenfassung)
     if any(w in low for w in ("antworten zeigen", "antworten", "antwort", "replies")):
-        tg.try_send(chat_id, agent_runner.antworten_bericht())
+        tg.try_send(chat_id, runner.antworten_bericht())
         return
 
     if any(w in low for w in ("nachfassen zeigen", "wer soll nachgefasst", "fällig")):
-        faellig = agent_runner.nachfass_faellig()
+        faellig = runner.nachfass_faellig()
         if faellig:
             zeilen = [f"⏰ {len(faellig)} Lead(s) fällig fürs Nachfassen:"]
             for f in faellig[:10]:
@@ -287,15 +308,6 @@ def main() -> None:
     cfg.orders_dir.mkdir(parents=True, exist_ok=True)
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Bridge prüfen ---
-    try:
-        bridge = EngineBridge(cfg.engine_dir)
-        print(f"[boot] Engine gefunden: {cfg.engine_dir}")
-    except EngineError as e:
-        print(f"[boot] FEHLER Engine: {e}")
-        _lock_freigeben()
-        sys.exit(1)
-
     # --- Telegram ---
     tg = TelegramAPI(cfg.bot_token)
     me = tg.get_me()
@@ -306,40 +318,16 @@ def main() -> None:
     bot_name = me["result"].get("username", "?")
     print(f"[bot] Gestartet als @{bot_name}")
 
-    # --- Operator-Kern ---
+    send_fn = lambda cid, txt: tg.try_send(cid, txt)
+
+    # --- LLM (Reasoning/Parsing) — optional, ohne Key deterministisch ---
     llm = build_anthropic_llm(cfg.anthropic_api_key or None)
     if llm:
         print("[bot] LLM-Unterstützung aktiv (Anthropic).")
     else:
         print("[bot] Kein API-Key — deterministischer Parser aktiv.")
 
-    intake = OperatorIntake(llm_fn=llm)
-    gate = ConfirmGate()
-
-    # Agent als Aufsatz: führt bestätigte Aufträge eigenständig (suchen + auffüllen,
-    # Stopp am harten Tor). Sendet nie selbst. Ohne Key arbeitet er deterministisch.
-    agent_runner = AgentRunner(
-        bridge=bridge,
-        data_dir=cfg.data_dir,
-        reporter=Reporter(bridge.engine_dir),
-        api_key=cfg.anthropic_api_key or None,
-    )
-    print("[bot] Agent-Modus aktiv — Aufträge werden eigenständig geführt.")
-
-    # Watcher: prüft alle 5 Min ob etwas gemeldet werden muss (Termin, Tor, Nachfassen)
-    # auto_abruf=True (E): ruft das Postfach selbst ab (read-only, kein Versand) —
-    # so erkennt der Bot neue Antworten vollautomatisch.
-    watcher = Watcher(
-        runner=agent_runner,
-        owner_chat_id=cfg.owner_chat_id,
-        send_fn=lambda cid, txt: tg.try_send(cid, txt),
-        intervall_sek=300,
-        auto_abruf=True,
-    )
-    watcher.starten()
-    print("[bot] Watcher gestartet (Intervall: 5 Min, Auto-Abruf an) — meldet Tore + Signale.")
-
-    # Closer: eigenständig, NICHT im B2B-Fluss. Nur für Live-Calls nach Termin-Signal.
+    # --- Closer: eigenständig, NICHT im B2B-Fluss. Nur Live-Calls nach Termin-Signal. ---
     closer_dir = (_PRODUCT_ROOT / "ClouseAgent").resolve()
     closer = CloserAdapter(closer_dir)
     if closer_dir.exists():
@@ -347,14 +335,100 @@ def main() -> None:
     else:
         print(f"[bot] Closer nicht gefunden ({closer_dir}) — Befehle melden das.")
 
-    mgr = DialogManager(
-        intake=intake,
-        gate=gate,
-        bridge=bridge,
-        orders_dir=cfg.orders_dir,
-        send_fn=lambda cid, txt: tg.try_send(cid, txt),
-        agent_runner=agent_runner,
+    # --- Plattform/Mandanten (F7): Register laden, Modus bestimmen ---
+    register = MandantenRegister(cfg.data_dir / "platform")
+    plattform = Plattform(
+        register,
+        api_key_default=cfg.anthropic_api_key or "",
+        reporter_factory=lambda ed: Reporter(ed),
     )
+    aktive = register.alle(nur_aktive=True)
+
+    def _mandant_sitzung(mandant) -> "Optional[Sitzung]":
+        """Baut für einen Mandanten eine isolierte Laufzeit (eigener Dialog auf
+        seiner eigenen Bridge + seinem eigenen Runner). Kein Querverkehr."""
+        runner = plattform.runner_oder_none(mandant.mandant_id)
+        if runner is None:
+            return Sitzung(name=mandant.name, betriebsbereit=False)
+        orders_dir = plattform.register.data_dir_fuer(mandant.mandant_id) / "orders"
+        try:
+            orders_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        m_llm = build_anthropic_llm(
+            mandant.anthropic_api_key or cfg.anthropic_api_key or None
+        )
+        m_mgr = DialogManager(
+            intake=OperatorIntake(llm_fn=m_llm),
+            gate=ConfirmGate(),
+            bridge=runner.bridge,
+            orders_dir=orders_dir,
+            send_fn=send_fn,
+            agent_runner=runner,
+        )
+        return Sitzung(runner=runner, mgr=m_mgr, name=mandant.name, betriebsbereit=True)
+
+    if aktive:
+        # === MULTI-TENANT: jeder Kunde ein isolierter Agent ===
+        print(f"[bot] Plattform-Modus: {len(aktive)} aktive(r) Mandant(en).")
+        router = Router(
+            plattform=plattform,
+            operator_chat_id=cfg.owner_chat_id,
+            sitzung_factory=_mandant_sitzung,
+        )
+        watcher = PlattformWatcher(
+            plattform, send_fn, intervall_sek=300, auto_abruf=True
+        )
+        watcher.starten()
+        print("[bot] Plattform-Watcher gestartet — je Mandant ein eigener Watcher "
+              "(meldet nur an seinen Owner, kein Querverkehr).")
+    else:
+        # === SINGLE-TENANT: Verhalten EXAKT wie vor F7 (rückwärtskompatibel) ===
+        try:
+            bridge = EngineBridge(cfg.engine_dir)
+            print(f"[boot] Engine gefunden: {cfg.engine_dir}")
+        except EngineError as e:
+            print(f"[boot] FEHLER Engine: {e}")
+            _lock_freigeben()
+            sys.exit(1)
+
+        # Agent als Aufsatz: führt bestätigte Aufträge eigenständig (suchen +
+        # auffüllen, Stopp am harten Tor). Sendet nie selbst.
+        agent_runner = AgentRunner(
+            bridge=bridge,
+            data_dir=cfg.data_dir,
+            reporter=Reporter(bridge.engine_dir),
+            api_key=cfg.anthropic_api_key or None,
+        )
+        print("[bot] Agent-Modus aktiv — Aufträge werden eigenständig geführt.")
+
+        mgr = DialogManager(
+            intake=OperatorIntake(llm_fn=llm),
+            gate=ConfirmGate(),
+            bridge=bridge,
+            orders_dir=cfg.orders_dir,
+            send_fn=send_fn,
+            agent_runner=agent_runner,
+        )
+
+        single = Sitzung(runner=agent_runner, mgr=mgr, name="single")
+        router = Router(
+            single_sitzung=single,
+            operator_chat_id=cfg.owner_chat_id,
+            owner_registrieren=lambda cid: _owner_registrieren(cfg, cid),
+        )
+
+        # Watcher: prüft alle 5 Min auf Meldungen (Termin, Tor, Nachfassen);
+        # auto_abruf=True (E): ruft das Postfach selbst ab (read-only, kein Versand).
+        watcher = Watcher(
+            runner=agent_runner,
+            owner_chat_id=cfg.owner_chat_id,
+            send_fn=send_fn,
+            intervall_sek=300,
+            auto_abruf=True,
+        )
+        watcher.starten()
+        print("[bot] Watcher gestartet (Intervall: 5 Min, Auto-Abruf an) — meldet Tore + Signale.")
 
     print("[bot] Bereit. Warte auf Nachrichten…")
 
@@ -371,7 +445,7 @@ def main() -> None:
             for upd in updates:
                 offset = upd["update_id"] + 1
                 try:
-                    _verarbeite_update(upd, tg, cfg, mgr, agent_runner, closer)
+                    _verarbeite_update(upd, tg, cfg, router, closer, plattform)
                 except Exception as exc:
                     print(f"[bot] Update-Fehler (ignoriert): {exc}")
 

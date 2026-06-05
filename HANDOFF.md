@@ -355,5 +355,24 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
      - license.py: Secret aus REBELLSYSTEM_LICENSE_SECRET; produktionsmodus=True
        wirft RuntimeError wenn Variable fehlt. secret_gesetzt() für Check-Install.
      - check_install: neuer Lizenz-Secret-Check (Hinweis, kein Startblocker).
-  F7 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
+  F7 Live-Abnahme + Paket + /code-review ultra ........ ⏳ (in Arbeit)
+    F7a bot.py auf Multi-Mandant verdrahtet .......... ✅ (+15 Tests)
+       - product/telegram/routing.py: Sitzung/Zugang/Router — entscheidet je
+         Chat-ID, WELCHE Mandanten-Laufzeit bedient (oder lehnt höflich ab).
+         Single-Tenant (kein aktiver Mandant) = Verhalten EXAKT wie vor F7
+         (Owner-Lock + Owner-Registrierung). Multi-Tenant: Chat→Mandant über
+         owner_chat_id, je Kunde eigener Runner+Dialog, kein Querverkehr;
+         fremde Chat-ID wird NIE bedient; Betreiber-Chat (cfg.owner_chat_id)
+         bekommt /plattform = reporting.plattform_report_text.
+       - bot.py: MandantenRegister(cfg.data_dir/'platform') + Plattform laden;
+         leeres Register → Single-Tenant-Pfad (EngineBridge/AgentRunner/Watcher
+         wie bisher), sonst PlattformWatcher (je Mandant ein Watcher, meldet nur
+         an seinen Owner). AgentRunner.bridge (read-only Property) für den
+         isolierten DialogManager je Mandant.
+       - product/telegram/test_bot_routing.py: Mock-TG + Mock-Runner/-Dialog;
+         belegt Single-Tenant unverändert, A↛B-Isolation, fremde Chat-ID
+         abgelehnt, Operator /plattform.
+    F7b Paket + Live-Check ........................... ⬜
+    F7c /code-review ultra (User löst aus) ........... ⬜
+    F7d Findings fixen ............................... ⬜
 ```

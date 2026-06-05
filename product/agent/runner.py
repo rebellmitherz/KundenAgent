@@ -326,3 +326,12 @@ class AgentRunner:
     @property
     def speicher(self) -> LaufSpeicher:
         return self._speicher
+
+    @property
+    def bridge(self):
+        """Die isolierte Engine-Bridge dieses Runners (read-only Zugriff).
+
+        Wird von der Multi-Mandanten-Verdrahtung (F7) gebraucht, um je Mandant
+        einen eigenen DialogManager auf genau diese Bridge zu setzen. Fügt keinen
+        Sende-Pfad hinzu — die Bridge bleibt die einzige Engine-Leitung."""
+        return self._bridge
