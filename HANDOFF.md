@@ -387,6 +387,19 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        - Branding: Hermes-Reste in package.py entfernt (Namen/Docstring/Manifest).
        - Verifiziert: Betreiber-ZIP enthält b2bbot/mine.py + 0 Secrets; Kunden-ZIP
          = nur 3 generierte Dateien, 0 .py, 0 Engine/Dashboard/Token/SMTP.
-    F7c /code-review ultra (User löst aus) ........... ⬜
-    F7d Findings fixen ............................... ⬜
+    F7c Selbst-Review + Korrekturen .................. ✅ (kein Ultra verfügbar)
+       - Closer-Befehle: im Multi-Tenant nur für Betreiber-Chat (kein Querverkehr
+         zwischen Kunden). Im Single-Tenant unveraendert.
+       - Toter 'import shutil' in package.py entfernt.
+       - Cache-Bug (nicht-bereite Sitzung dauerhaft gecacht) bereits F7a-Fix.
+    F7d Findings fixen ............................... ✅ (in F7c integriert)
+
+PHASE F7 ABGESCHLOSSEN. 27 Suiten, 0 rot.
+Stand: ae6009b — alle 4 Commits gepusht (User).
+
+NÄCHSTE PHASE:
+  F8 Kunden-Frontend / Connector .................. ⬜ (wenn SaaS-Betrieb läuft)
+     - Echtes Kunden-UI (ohne Betreiber-Dashboard/Setup/Engine-Felder)
+     - API/Connector zwischen Kunden-UI und isolierter Mandanten-Laufzeit
+     - Empfohlen: Opus / High wenn bereit
 ```
