@@ -133,7 +133,11 @@ class Router:
             sitzung = self._cache.get(mandant.mandant_id)
             if sitzung is None and self._factory is not None:
                 sitzung = self._factory(mandant)
-                if sitzung is not None:
+                # NUR betriebsbereite Sitzungen cachen. Ein noch nicht
+                # eingerichteter Mandant (Engine kommt evtl. später) wird beim
+                # nächsten Versuch erneut gebaut — sonst bliebe er bis zum
+                # Neustart fälschlich "in Einrichtung".
+                if sitzung is not None and sitzung.betriebsbereit:
                     self._cache[mandant.mandant_id] = sitzung
             if sitzung is None or not sitzung.betriebsbereit:
                 return Zugang(ist_operator=ist_op, ablehnung=IN_EINRICHTUNG_TEXT)

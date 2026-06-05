@@ -263,6 +263,34 @@ def t_multi_nicht_eingerichteter_mandant():
     assert tg.letzter == IN_EINRICHTUNG_TEXT
 
 
+def t_multi_nicht_bereit_wird_nicht_dauerhaft_gecacht():
+    """Wird die Engine erst nach dem ersten Versuch bereit, muss der Mandant
+    danach normal bedient werden — kein dauerhaftes 'in Einrichtung'."""
+    tg = FakeTG()
+    mA = Mandant(mandant_id="a", name="Kunde A", owner_chat_id="A")
+    plattform = FakePlattform([mA], {})
+    rA = FakeRunner("a")
+    zustand = {"bereit": False}
+
+    def factory(m):
+        if zustand["bereit"]:
+            return Sitzung(runner=rA, mgr=FakeMgr("a"), name=m.name, betriebsbereit=True)
+        return Sitzung(name=m.name, betriebsbereit=False)
+
+    router = Router(plattform=plattform, operator_chat_id="OP", sitzung_factory=factory)
+
+    # 1. Versuch: Engine noch nicht bereit
+    _dispatch(tg, router, _upd("A", "Antworten zeigen"), plattform=plattform)
+    assert tg.letzter == IN_EINRICHTUNG_TEXT
+    assert rA.calls == []
+
+    # Engine wird bereit → 2. Versuch muss bedient werden (kein stale Cache)
+    zustand["bereit"] = True
+    _dispatch(tg, router, _upd("A", "Antworten zeigen"), plattform=plattform)
+    assert tg.letzter == "[antworten:a]"
+    assert "antworten_bericht" in rA.calls
+
+
 # ─── 3. Betreiber-Sicht ───────────────────────────────────────────────────────
 
 def t_operator_plattform_gesamtsicht():
@@ -330,6 +358,7 @@ if __name__ == "__main__":
     test("Dialog routet zum richtigen Manager", t_multi_dialog_routet_zum_richtigen_mgr)
     test("Fremde Chat-ID wird nicht bedient", t_multi_fremde_chat_id_wird_nicht_bedient)
     test("Nicht eingerichteter Mandant → Hinweis", t_multi_nicht_eingerichteter_mandant)
+    test("Nicht-bereit wird nicht dauerhaft gecacht", t_multi_nicht_bereit_wird_nicht_dauerhaft_gecacht)
 
     print("\n── Betreiber-Sicht ──")
     test("/plattform → Gesamtsicht (Operator)", t_operator_plattform_gesamtsicht)
