@@ -236,7 +236,10 @@ def _verarbeite_update(
         return
 
     # --- Closer-Befehle (eigenständig, nicht im B2B-Fluss) ---
-    if any(w in low for w in ("closer starten", "closer start", "call starten",
+    # Im Multi-Tenant-Modus ist der Closer eine geteilte Betreiber-Ressource
+    # (lokales Mikrofon) — Steuerung nur durch den Betreiber-Chat, NICHT durch
+    # Kunden-Chats (verhindert Querverkehr / Missbrauch zwischen Mandanten).
+    if zugang.ist_operator and any(w in low for w in ("closer starten", "closer start", "call starten",
                                "coaching starten", "/closer starten")):
         erg = closer.starten()
         if erg["ok"]:
@@ -248,7 +251,7 @@ def _verarbeite_update(
             tg.try_send(chat_id, f"⚠️ Closer konnte nicht starten: {erg['meldung']}")
         return
 
-    if any(w in low for w in ("closer stoppen", "closer stop", "call stoppen",
+    if zugang.ist_operator and any(w in low for w in ("closer stoppen", "closer stop", "call stoppen",
                                "coaching stoppen", "/closer stoppen")):
         erg = closer.stoppen()
         if erg["ok"]:
@@ -257,7 +260,7 @@ def _verarbeite_update(
             tg.try_send(chat_id, f"ℹ️ {erg['meldung']}")
         return
 
-    if any(w in low for w in ("closer status", "closer", "/closer")):
+    if zugang.ist_operator and any(w in low for w in ("closer status", "closer", "/closer")):
         st = closer.status()
         if st.get("laeuft"):
             tg.try_send(chat_id,
