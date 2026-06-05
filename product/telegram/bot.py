@@ -76,7 +76,8 @@ def _lock_pruefen() -> None:
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {alter_pid}"],
                 capture_output=True, text=True,
-            ).stdout
+                encoding="cp1252", errors="replace",
+            ).stdout or ""
             if str(alter_pid) in out and "python" in out.lower():
                 print(f"FEHLER: Bot läuft bereits (PID {alter_pid}). Abbruch.")
                 sys.exit(1)

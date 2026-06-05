@@ -35,7 +35,8 @@ product/data/logs/
 product/data/output/
 product/data/agent/
 
-# IDE
+# IDE / Agent-Werkzeuge
+.claude/
 .vscode/
 .idea/
 *.suo
