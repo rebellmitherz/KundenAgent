@@ -336,9 +336,14 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        kein geteiltes engine_dir unter aktiven Mandanten, eindeutige Slug-IDs.
        per_owner()-Routing (Telegram), atomare Persistenz. Reine Daten-/FS-Logik.
        Register-Datei (Secrets!) gitignored.
-  F4 Plattform-Orchestrierung ......................... ⬜ (Opus 4.8 / high)
-     - pro Mandant isolierter Runner/Bridge (Factory); Telegram-Routing per
-       owner_chat_id; Watcher je Mandant. Nichts Bestehendes einschränken.
+  F4 Plattform-Orchestrierung ......................... ✅ (+12 Tests)
+     - product/platform/plattform.py: Plattform (Factory baut pro Mandant einen
+       isolierten AgentRunner+EngineBridge, gecacht; api_key default+override;
+       aktive_runner überspringt nicht eingerichtete/inaktive). bridge/reporter
+       injizierbar (testbar ohne Engine). mandant_fuer_chat() = Telegram-Routing.
+     - PlattformWatcher: ein Watcher je aktivem Mandant, meldet NUR an dessen
+       owner_chat_id — Test belegt: kein Querverkehr zwischen Kunden.
+     - bot.py (Live-Entry) noch single-tenant; Multi-Mandanten-Verdrahtung in F7.
   F5 Revenue-Reporting pro Mandant + Operator-Gesamtsicht ⬜ (Sonnet 4.6 / mittel)
      - Hero-Metrik: geprüfte Termine (F1) je Kunde; Cross-Mandanten-Übersicht.
   F6 Branding + Lizenz härten (Mandanten-Lizenz) ...... ⬜ (Sonnet 4.6 / niedrig)
