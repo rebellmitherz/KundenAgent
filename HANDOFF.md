@@ -315,7 +315,12 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
      - notifier: bestätigter Termin = Prio 1; widersprüchlich = Prio-2-Prüfmeldung.
      - runner.pruef_termine(); bot /status zeigt geprüfte Termine statt roher.
      - Belegt am realen Fehlalarm (artundweise "keinen Bedarf" → war Termin).
-  F2 Reply<->Funnel-Join reparieren ................... ⬜ (Opus 4.8 / mittel-high)
+  F2 Reply<->Funnel-Join reparieren ................... ✅ (+8 Tests)
+     - bridge.kampagne_rohdaten: Join über entry_key ODER E-Mail-Domain;
+       Antworten ohne Pipeline-Bezug (frühere Kampagne) werden ehrlich gezählt
+       (antwort_ohne_bezug/termin_ohne_bezug) statt unsichtbar zu verschwinden.
+     - funnel.stufe_von: Domain-Fallback (rückwärtskompatibel); Bericht weist
+       'ohne Bezug' aus. Live belegt: 5 verwaiste Antworten (1 Termin) jetzt sichtbar.
   F3 Revenue-First-Sicht (eine Kennzeile) ............. ⬜ (Sonnet 4.6 / mittel)
   F4 Branding + Lizenz-Secret härten .................. ⬜ (Sonnet 4.6 / niedrig)
   F5 Mandantenfähigkeit (Pro-Kunde-Profile) ........... ⬜ (Opus 4.8 / high)

@@ -18,9 +18,9 @@ from product.agent.funnel import STUFEN, funnel_aus_rohdaten, funnel_bericht, st
 from product.agent.runner import AgentRunner
 
 
-def _e(ek, gesendet=False, bereit=False):
+def _e(ek, gesendet=False, bereit=False, email=""):
     return {"entry_key": ek, "firma": ek, "ort": "X", "ansprechpartner": "Y",
-            "gesendet": gesendet, "bereit": bereit}
+            "gesendet": gesendet, "bereit": bereit, "email": email}
 
 
 # ─── Runner-Mock-Bridge ──────────────────────────────────────────────────────
@@ -112,6 +112,44 @@ def t_funnel_lead_limit(_d):
 def t_funnel_leer(_d):
     f = funnel_aus_rohdaten({"entries": [], "antwort_keys": [], "termin_keys": []})
     assert f["gesamt"] == 0
+
+
+# ─── F2: Domain-Fallback-Join + 'ohne Bezug' ────────────────────────────────
+
+def t_stufe_domain_fallback_termin(_d):
+    """Kein Key-Treffer, aber Domain-Treffer → termin."""
+    e = _e("k1", gesendet=True, email="chef@alpha.de")
+    s = stufe_von(e, set(), set(), {"alpha.de"}, {"alpha.de"})
+    assert s == "termin"
+
+
+def t_stufe_domain_fallback_geantwortet(_d):
+    e = _e("k1", gesendet=True, email="chef@alpha.de")
+    assert stufe_von(e, set(), set(), {"alpha.de"}, set()) == "geantwortet"
+
+
+def t_stufe_key_schlaegt_immer_an(_d):
+    """Key-Treffer reicht auch ohne Domain (Rückwärtskompatibilität)."""
+    assert stufe_von(_e("k1", gesendet=True), {"k1"}, set()) == "geantwortet"
+
+
+def t_funnel_domain_join_zaehlt(_d):
+    roh = {
+        "entries": [_e("a", gesendet=True, email="x@alpha.de")],
+        "antwort_keys": [], "termin_keys": [],
+        "antwort_domains": ["alpha.de"], "termin_domains": ["alpha.de"],
+    }
+    f = funnel_aus_rohdaten(roh)
+    assert f["stufen"]["termin"] == 1
+
+
+def t_bericht_zeigt_ohne_bezug(_d):
+    f = {"gesamt": 2, "stufen": {"gefunden": 0, "bereit": 0, "angeschrieben": 2,
+                                 "geantwortet": 0, "termin": 0},
+         "antwort_ohne_bezug": 3, "termin_ohne_bezug": 1}
+    t = funnel_bericht(f)
+    assert "3 Antwort" in t and "ohne Bezug" in t
+    assert "1 mit Termin-Signal" in t
 
 
 # ─── funnel_bericht ──────────────────────────────────────────────────────────
@@ -223,6 +261,13 @@ if __name__ == "__main__":
     test("zählt alle Stufen", t_funnel_zaehlt_alle_stufen)
     test("Lead-Limit (Zählung bleibt voll)", t_funnel_lead_limit)
     test("leer", t_funnel_leer)
+
+    print("\n── F2: Domain-Join + ohne Bezug ──")
+    test("stufe_von Domain-Fallback → termin", t_stufe_domain_fallback_termin)
+    test("stufe_von Domain-Fallback → geantwortet", t_stufe_domain_fallback_geantwortet)
+    test("stufe_von Key schlägt an (rückwärtskompatibel)", t_stufe_key_schlaegt_immer_an)
+    test("funnel zählt Domain-Join", t_funnel_domain_join_zaehlt)
+    test("Bericht zeigt 'ohne Bezug'", t_bericht_zeigt_ohne_bezug)
 
     print("\n── funnel_bericht ──")
     test("leer → Hinweis", t_bericht_leer)

@@ -32,11 +32,11 @@ def _engine(tmp: Path, entries=None, reply_items=None) -> EngineBridge:
     return EngineBridge(tmp)
 
 
-def _eintrag(ek, firma, sent=None, ready="yes", dnr=False, camps=None):
+def _eintrag(ek, firma, sent=None, ready="yes", dnr=False, camps=None, email=""):
     return {"entry_key": ek, "company_name": firma, "city": "Köln",
             "contact_name": "Chef", "sent_message_id": sent,
             "ready_to_send": ready, "do_not_resend": dnr,
-            "contacted_in_campaigns": camps or []}
+            "contacted_in_campaigns": camps or [], "email": email}
 
 
 # ─── Runner ──────────────────────────────────────────────────────────────────
@@ -69,7 +69,9 @@ def test(name, fn):
 def t_leer_ohne_pipeline(d):
     bridge = _engine(d)
     roh = bridge.kampagne_rohdaten()
-    assert roh == {"entries": [], "antwort_keys": [], "termin_keys": []}
+    assert roh["entries"] == [] and roh["antwort_keys"] == [] and roh["termin_keys"] == []
+    assert roh["antwort_domains"] == [] and roh["termin_domains"] == []
+    assert roh["antwort_ohne_bezug"] == 0 and roh["termin_ohne_bezug"] == 0
 
 
 def t_normalisierung_und_flags(d):
@@ -114,6 +116,41 @@ def t_dnr_nicht_bereit(d):
     assert roh["entries"][0]["bereit"] is False
 
 
+# ─── F2: Domain-Join + 'ohne Bezug' ──────────────────────────────────────────
+
+def t_domain_join_rettet_anderen_key(d):
+    """Reply hat anderen entry_key, aber gleiche Domain → zählt als Bezug + Domain-Set."""
+    entries = [_eintrag("a", "Alpha", sent="m1", email="chef@alpha.de")]
+    reply = [{"entry_key": "ZZZ-anderer-key", "from_email": "info@alpha.de",
+              "appointment_ready": True}]
+    roh = _engine(d, entries, reply_items=reply).kampagne_rohdaten()
+    assert "alpha.de" in roh["antwort_domains"]
+    assert "alpha.de" in roh["termin_domains"]
+    assert roh["antwort_ohne_bezug"] == 0      # Domain matcht → Bezug da
+    assert roh["termin_ohne_bezug"] == 0
+
+
+def t_orphan_ohne_bezug_gezaehlt(d):
+    """Reply ohne passenden Key UND ohne passende Domain → ehrlich als 'ohne Bezug'."""
+    entries = [_eintrag("a", "Alpha", sent="m1", email="chef@alpha.de")]
+    reply = [{"entry_key": "fremd", "from_email": "we@fremdfirma.de",
+              "appointment_ready": True}]
+    roh = _engine(d, entries, reply_items=reply).kampagne_rohdaten()
+    assert roh["antwort_ohne_bezug"] == 1
+    assert roh["termin_ohne_bezug"] == 1
+    assert roh["antwort_keys"] == ["fremd"]    # Key bleibt erfasst (für Anzeige)
+    assert "fremdfirma.de" in roh["antwort_domains"]
+
+
+def t_from_email_actual_bevorzugt(d):
+    entries = [_eintrag("a", "Alpha", email="chef@alpha.de")]
+    reply = [{"entry_key": "x", "from_email": "noreply@relay.com",
+              "from_email_actual": "info@alpha.de", "appointment_ready": False}]
+    roh = _engine(d, entries, reply_items=reply).kampagne_rohdaten()
+    assert "alpha.de" in roh["antwort_domains"]   # actual gewinnt über relay
+    assert roh["antwort_ohne_bezug"] == 0
+
+
 if __name__ == "__main__":
     print("\n=== Phase C — bridge.kampagne_rohdaten (read-only) ===\n")
     test("leer ohne Pipeline", t_leer_ohne_pipeline)
@@ -121,6 +158,9 @@ if __name__ == "__main__":
     test("reply_queue-Join (antwort/termin)", t_reply_join)
     test("Kampagnen-Filter", t_kampagnen_filter)
     test("do_not_resend → nicht bereit", t_dnr_nicht_bereit)
+    test("F2: Domain-Join rettet anderen Key", t_domain_join_rettet_anderen_key)
+    test("F2: Orphan ohne Bezug gezählt", t_orphan_ohne_bezug_gezaehlt)
+    test("F2: from_email_actual bevorzugt", t_from_email_actual_bevorzugt)
 
     print(f"\n{'=' * 40}")
     gesamt = _ok + _fail

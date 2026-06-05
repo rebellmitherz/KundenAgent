@@ -352,42 +352,84 @@ class EngineBridge:
                 break
         return out
 
+    @staticmethod
+    def _domain(email: str) -> str:
+        """Kleingeschriebene Domain einer E-Mail ('a.b@Firma.DE' → 'firma.de'). Leer wenn keine."""
+        email = (email or "").strip().lower()
+        if "@" in email:
+            return email.split("@", 1)[1].strip()
+        return ""
+
+    _LEERE_KAMPAGNE = {
+        "entries": [], "antwort_keys": [], "termin_keys": [],
+        "antwort_domains": [], "termin_domains": [],
+        "antwort_ohne_bezug": 0, "termin_ohne_bezug": 0,
+    }
+
     def kampagne_rohdaten(self, campaign: Optional[str] = None, limit: int = 1000) -> dict:
-        """V2 (read-only): Rohdaten für die Trichter-Ansicht (Phase C).
+        """V2 (read-only): Rohdaten für die Trichter-Ansicht (Phase C + F2).
 
         Liest Pipeline + reply_queue. Klassifiziert NICHT (das macht die
         Agent-Schicht), sondern liefert je Lead die stufen-relevanten Felder plus
-        die entry_keys, die geantwortet bzw. einen Termin haben. Kein Subprozess.
+        die entry_keys/Domains, die geantwortet bzw. einen Termin haben. Kein Subprozess.
+
+        F2 — Reply<->Funnel-Join robust: Antworten werden zusätzlich über die
+        E-Mail-Domain mit der Pipeline verknüpft (fängt Fälle, in denen derselbe
+        Lead über Kampagnen hinweg einen anderen entry_key bekam). Antworten, die
+        zu KEINEM aktuellen Pipeline-Lead passen (frühere Kampagne), werden ehrlich
+        als 'ohne Pipeline-Bezug' gezählt, statt unsichtbar zu verschwinden.
 
         campaign: optional auf eine Kampagne (contacted_in_campaigns) einschränken.
         """
         pfad = self._pipeline_pfad()
         if not pfad.exists():
-            return {"entries": [], "antwort_keys": [], "termin_keys": []}
+            return dict(self._LEERE_KAMPAGNE)
         try:
             data = json.loads(pfad.read_text(encoding="utf-8"))
         except Exception:
-            return {"entries": [], "antwort_keys": [], "termin_keys": []}
+            return dict(self._LEERE_KAMPAGNE)
 
-        # Antworten/Termine aus reply_queue (entry_key-Join)
+        alle_eintraege = data.get("entries", [])
+        # Für den Join: ALLE Pipeline-Keys/Domains (nicht nur die Kampagnen-Auswahl),
+        # damit ein Domain-Treffer auch außerhalb des Kampagnenfilters greift.
+        alle_keys = {e.get("entry_key", "") for e in alle_eintraege if e.get("entry_key")}
+        alle_domains = {self._domain(e.get("email", "")) for e in alle_eintraege}
+        alle_domains.discard("")
+
+        # Antworten/Termine aus reply_queue (entry_key + Domain-Join)
         antwort_keys: set[str] = set()
         termin_keys: set[str] = set()
+        antwort_domains: set[str] = set()
+        termin_domains: set[str] = set()
+        antwort_ohne_bezug = 0
+        termin_ohne_bezug = 0
         rq = self._reply_queue_pfad()
         if rq.exists():
             try:
                 items = json.loads(rq.read_text(encoding="utf-8")).get("items", [])
                 for it in items:
                     ek = it.get("entry_key", "")
-                    if not ek:
-                        continue
-                    antwort_keys.add(ek)
-                    if it.get("appointment_ready"):
-                        termin_keys.add(ek)
+                    dom = self._domain(it.get("from_email_actual") or it.get("from_email", ""))
+                    ist_termin = bool(it.get("appointment_ready"))
+                    if ek:
+                        antwort_keys.add(ek)
+                        if ist_termin:
+                            termin_keys.add(ek)
+                    if dom:
+                        antwort_domains.add(dom)
+                        if ist_termin:
+                            termin_domains.add(dom)
+                    # Bezug zur AKTUELLEN Pipeline? (Key ODER Domain)
+                    hat_bezug = (ek in alle_keys) or (dom in alle_domains)
+                    if not hat_bezug:
+                        antwort_ohne_bezug += 1
+                        if ist_termin:
+                            termin_ohne_bezug += 1
             except Exception:
                 pass
 
         entries: list[dict] = []
-        for e in data.get("entries", []):
+        for e in alle_eintraege:
             if campaign:
                 if campaign not in (e.get("contacted_in_campaigns") or []):
                     continue
@@ -396,6 +438,7 @@ class EngineBridge:
                 "firma":           e.get("company_name", ""),
                 "ort":             e.get("city", ""),
                 "ansprechpartner": e.get("contact_name", ""),
+                "email":           e.get("email", ""),
                 "gesendet":        bool(e.get("sent_message_id")),
                 "bereit": (
                     (e.get("ready_to_send") or "").strip().lower() == "yes"
@@ -409,6 +452,10 @@ class EngineBridge:
             "entries": entries,
             "antwort_keys": sorted(antwort_keys),
             "termin_keys": sorted(termin_keys),
+            "antwort_domains": sorted(antwort_domains),
+            "termin_domains": sorted(termin_domains),
+            "antwort_ohne_bezug": antwort_ohne_bezug,
+            "termin_ohne_bezug": termin_ohne_bezug,
         }
 
     @staticmethod
