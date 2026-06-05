@@ -45,8 +45,8 @@ def meldungen_ermitteln(
     """
     meldungen: list[Meldung] = []
 
-    # 1. Termin-Signale (höchste Priorität)
-    termine = [a for a in antworten if a.get("terminwunsch")]
+    # 1. Termin-Signale (höchste Priorität) — erledigte ausgeblendet
+    termine = [a for a in antworten if a.get("terminwunsch") and not a.get("erledigt")]
     if termine:
         firmen = ", ".join(a.get("firma", "?") for a in termine[:3])
         mehr = f" und {len(termine)-3} weitere" if len(termine) > 3 else ""

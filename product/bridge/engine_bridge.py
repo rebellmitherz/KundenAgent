@@ -293,6 +293,11 @@ class EngineBridge:
                 "termin_grund": it.get("appointment_reason", ""),
                 "kategorie":    it.get("reply_sales_category", ""),
                 "entry_key":    ek,
+                # Kontext: auf welche Mail wurde geantwortet, aus welchem Postfach
+                "von":          it.get("from_email", ""),
+                "postfach":     it.get("received_account", ""),
+                "gesendet_am":  it.get("sent_at", ""),
+                "auto_antwort": bool(it.get("is_auto_reply")),
             })
             if len(out) >= limit:
                 break

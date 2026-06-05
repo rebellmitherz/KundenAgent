@@ -17,6 +17,7 @@ from typing import Optional
 
 from product.agent.brain import Brain, Laufergebnis, baue_brain
 from product.agent.campaign import KampagnenSpeicher
+from product.agent.erledigt import ErledigtSpeicher
 from product.agent.funnel import funnel_aus_rohdaten, funnel_bericht
 from product.agent.memory import LaufSpeicher
 from product.agent.replies import antworten_bericht, termine
@@ -47,6 +48,7 @@ class AgentRunner:
         self._max_schritte = max_schritte
         self._speicher = LaufSpeicher(data_dir)
         self._kampagnen = KampagnenSpeicher(data_dir)
+        self._erledigt = ErledigtSpeicher(data_dir)
 
     # ----------------------------------------------------------------- Steuern
 
@@ -122,21 +124,58 @@ class AgentRunner:
         """Liest eingehende Antworten (read-only) — kundenfähige Felder.
 
         Kein Versand, nichts das senden könnte. Gibt [] wenn keine Bridge.
+        Jede Antwort wird mit 'erledigt' markiert (abgeschlossener Termin).
         """
         if self._bridge is None:
             return []
         try:
-            return self._bridge.antworten_lesen(limit=limit)
+            roh = self._bridge.antworten_lesen(limit=limit)
         except Exception:
             return []
+        erledigte = self._erledigt.erledigte_keys()
+        for a in roh:
+            a["erledigt"] = a.get("entry_key", "") in erledigte
+        return roh
 
     def antworten_bericht(self, limit: int = 30) -> str:
         """Kundenfähige Zusammenfassung der Antworten (hebt Terminwünsche hervor)."""
         return antworten_bericht(self.antworten(limit=limit))
 
     def termin_signale(self, limit: int = 30) -> list[dict]:
-        """Nur Antworten mit Terminwunsch — das harte Signal (für Phase D)."""
-        return termine(self.antworten(limit=limit))
+        """Nur OFFENE Termin-Signale — erledigte werden ausgeblendet (Phase D)."""
+        return [a for a in termine(self.antworten(limit=limit)) if not a.get("erledigt")]
+
+    def termin_abschliessen(self, firma_oder_key: str) -> dict:
+        """Markiert einen Termin als erledigt (read-only zur Engine, agent-lokal).
+
+        Sucht in den offenen Terminen nach Firmenname (Teilstring, case-insensitiv)
+        oder exaktem entry_key. Bei Mehrdeutigkeit wird nachgefragt.
+        """
+        suche = (firma_oder_key or "").strip().lower()
+        if not suche:
+            return {"ok": False, "meldung": "Bitte sag mir, welcher Termin erledigt ist."}
+
+        offene = self.termin_signale()
+        if not offene:
+            return {"ok": False, "meldung": "Aktuell sind keine offenen Termine vorhanden."}
+
+        treffer = [
+            a for a in offene
+            if a.get("entry_key", "").lower() == suche
+            or suche in (a.get("firma", "").lower())
+        ]
+        if not treffer:
+            namen = ", ".join(a.get("firma", "?") for a in offene)
+            return {"ok": False, "meldung": f"Keinen offenen Termin zu '{firma_oder_key}' gefunden. Offen: {namen}"}
+        if len(treffer) > 1:
+            namen = ", ".join(a.get("firma", "?") for a in treffer)
+            return {"ok": False, "meldung": f"Mehrere Treffer ({namen}). Bitte genauer angeben."}
+
+        a = treffer[0]
+        neu = self._erledigt.abschliessen(a.get("entry_key", ""), a.get("firma", ""))
+        if not neu:
+            return {"ok": True, "meldung": f"{a.get('firma','?')} war bereits abgeschlossen."}
+        return {"ok": True, "firma": a.get("firma", ""), "meldung": f"✅ Termin mit {a.get('firma','?')} als erledigt markiert."}
 
     # ----------------------------------------------------------------- Kampagnen-Trichter (Phase C)
 

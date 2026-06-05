@@ -109,8 +109,10 @@ def t_keine_rohdaten_keine_ids_in_anzeige(d):
     res = bridge.antworten_lesen()[0]
     assert "message_id" not in res
     assert "sent_log_id" not in res
+    assert "from_email_actual" not in res
     assert set(res.keys()) == {"firma", "betreff", "auszug", "klasse", "sentiment",
-                               "terminwunsch", "termin_grund", "kategorie", "entry_key"}
+                               "terminwunsch", "termin_grund", "kategorie", "entry_key",
+                               "von", "postfach", "gesendet_am", "auto_antwort"}
 
 
 def t_kaputte_datei_leer(d):

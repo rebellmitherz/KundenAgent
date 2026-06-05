@@ -22,8 +22,82 @@ def _ist_positiv(antwort: dict) -> bool:
 
 
 def termine(antworten: list[dict]) -> list[dict]:
-    """Antworten mit Terminwunsch — das harte Signal für Phase D."""
-    return [a for a in antworten if a.get("terminwunsch")]
+    """Offene Antworten mit Terminwunsch — das harte Signal für Phase D.
+
+    Erledigte Termine (a['erledigt']) werden ausgeblendet."""
+    return [a for a in antworten if a.get("terminwunsch") and not a.get("erledigt")]
+
+
+def _datum_kurz(wert: str) -> str:
+    """'2026-04-27T23:49:09' → '27.04.2026'. Leerwert bleibt leer."""
+    wert = (wert or "").strip()
+    if len(wert) >= 10 and wert[4] == "-" and wert[7] == "-":
+        return f"{wert[8:10]}.{wert[5:7]}.{wert[0:4]}"
+    return wert
+
+
+def _antwort_block(i: int, a: dict) -> list[str]:
+    """Ein detaillierter Antwort-Block: auf welche Mail, aus welchem Postfach,
+    der Antworttext selbst. Gemeinsame Formatierung für Termin- und Voll-Ansicht."""
+    firma = a.get("firma") or "Unbekannt"
+    von = a.get("von") or ""
+    betreff = a.get("betreff") or ""
+    auszug = (a.get("auszug") or "").strip()
+    grund = a.get("termin_grund") or ""
+    postfach = a.get("postfach") or ""
+    gesendet = _datum_kurz(a.get("gesendet_am") or "")
+
+    zeilen = [f"── {i}. {firma} ──"]
+    if von:
+        zeilen.append(f"   Von:      {von}")
+    if betreff:
+        zeilen.append(f"   Betreff:  {betreff}")
+    if gesendet:
+        zeilen.append(f"   Auf Mail vom: {gesendet}" + (f" ({postfach})" if postfach else ""))
+    elif postfach:
+        zeilen.append(f"   Postfach: {postfach}")
+    if a.get("terminwunsch") and grund:
+        zeilen.append(f"   Signal:   🎯 {grund}")
+    if auszug:
+        zeilen.append(f"   Antwort:  {auszug[:400]}")
+    return zeilen
+
+
+def termin_detail_bericht(antworten: list[dict]) -> str:
+    """Detaillierte Aufbereitung der Termin-Signale inkl. E-Mail-Auszug."""
+    mit_termin = termine(antworten)
+    if not mit_termin:
+        return "📭 Aktuell keine Termin-Signale vorhanden."
+
+    zeilen = [f"🎯 {len(mit_termin)} Termin-Anfrage(n) — hier die Details:\n"]
+    for i, a in enumerate(mit_termin, 1):
+        zeilen.extend(_antwort_block(i, a))
+        zeilen.append("")
+
+    zeilen.append("👉 Wenn du den Call anfängst: schreib 'closer starten'.")
+    zeilen.append("✅ Erledigt? Schreib 'Termin abschließen <Firma>'.")
+    return "\n".join(zeilen)
+
+
+def antwort_detail_bericht(antworten: list[dict]) -> str:
+    """Volle Detailansicht ALLER Antworten (auf welche Mail + Antworttext).
+
+    Auto-Antworten (Out-of-Office) ans Ende, echte Antworten zuerst."""
+    if not antworten:
+        return "📭 Noch keine Antworten eingegangen. Ich behalte den Posteingang im Blick."
+
+    echte = [a for a in antworten if not a.get("auto_antwort")]
+    autos = [a for a in antworten if a.get("auto_antwort")]
+    geordnet = echte + autos
+
+    zeilen = [f"📬 {len(antworten)} Antwort(en) — Details:\n"]
+    for i, a in enumerate(geordnet, 1):
+        block = _antwort_block(i, a)
+        if a.get("auto_antwort"):
+            block[0] += "  (automatische Antwort)"
+        zeilen.extend(block)
+        zeilen.append("")
+    return "\n".join(zeilen)
 
 
 def antworten_bericht(antworten: list[dict]) -> str:

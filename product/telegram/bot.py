@@ -31,6 +31,7 @@ sys.path.insert(0, str(_TG_SELLER))
 
 from tg_api import TelegramAPI  # noqa: E402 (aus b2bbot/telegram_seller)
 
+from product.agent.replies import antwort_detail_bericht, termin_detail_bericht
 from product.agent.runner import AgentRunner
 from product.agent.watcher import Watcher
 from product.bridge.engine_bridge import EngineBridge, EngineError
@@ -55,8 +56,14 @@ Ich verstehe dich, frage nach wenn etwas fehlt, und
 starte die Suche erst nach deiner Bestätigung.
 
 Befehle:
-  /status   — aktueller Auftragsstatus
-  /hilfe    — diese Nachricht
+  /status              — Status + Kampagnen-Überblick
+  Antworten            — Überblick eingegangener Antworten
+  Mail zeigen          — volle Antworten (auf welche Mail + Text)
+  Termin aufbereiten   — Termin-Anfragen im Detail
+  Termin abschließen <Firma> — Termin als erledigt markieren
+  Nachfassen zeigen    — wer ist fürs Follow-up fällig
+  closer starten/stoppen/status — Live-Coaching im Call
+  /hilfe               — diese Nachricht
 """
 
 
@@ -150,7 +157,31 @@ def _verarbeite_update(
         tg.try_send(chat_id, _agent_status_text(agent_runner))
         return
 
-    if any(w in low for w in ("antworten zeigen", "antworten", "replies")):
+    # Termin abschließen — MUSS vor den allgemeinen Termin-/Antwort-Handlern stehen
+    if any(w in low for w in ("termin abschließen", "termin abschliessen",
+                               "abschließen", "abschliessen", "termin erledigt")):
+        rest = low
+        for w in ("termin abschließen", "termin abschliessen", "termin erledigt",
+                  "abschließen", "abschliessen", "termin"):
+            rest = rest.replace(w, "")
+        erg = agent_runner.termin_abschliessen(rest.strip())
+        tg.try_send(chat_id, erg.get("meldung", "Erledigt."))
+        return
+
+    # Volle Detail-Ansicht aller Antworten (auf welche Mail + Antworttext)
+    if any(w in low for w in ("mail zeigen", "mails zeigen", "antwort details",
+                               "ganze antwort", "volle antwort", "alle antworten zeigen",
+                               "details zeigen")):
+        tg.try_send(chat_id, antwort_detail_bericht(agent_runner.antworten()))
+        return
+
+    # Termin-Details aufbereiten
+    if any(w in low for w in ("termin", "aufbereiten", "terminanfrage")):
+        tg.try_send(chat_id, termin_detail_bericht(agent_runner.antworten()))
+        return
+
+    # Antworten-Überblick (Zusammenfassung)
+    if any(w in low for w in ("antworten zeigen", "antworten", "antwort", "replies")):
         tg.try_send(chat_id, agent_runner.antworten_bericht())
         return
 
