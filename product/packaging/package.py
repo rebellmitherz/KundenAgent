@@ -1,27 +1,30 @@
-"""Package-Skript — erstellt sauberes Kunden-Paket als ZIP.
+"""Package-Skript — baut ZWEI strikt getrennte Pakete (SaaS-sicher).
 
 Aufruf (vom Installations-Root):
-    python product/packaging/package.py
+    python product/packaging/package.py            # baut BEIDE Pakete
+    python product/packaging/package.py --typ kunde
+    python product/packaging/package.py --typ betreiber
     python product/packaging/package.py --output C:/Lieferung/
 
-Erzeugt: dist/hermes-sales-operator-{version}.zip
+Die beiden Paket-Arten werden NIE vermischt:
 
-Was INS Paket kommt:
-  product/    (ohne Tests, ohne keygen.py, ohne __pycache__, ohne Secrets)
-  b2bbot/     (ohne .env, ohne output/, ohne .git, ohne __pycache__)
-  start_operator.bat
-  start_ui.bat
-  requirements.txt
-  SETUP.md
+1) BETREIBER-PAKET  →  dist/rebellsystem-operator-v{version}.zip
+   Vollständig lauffähiges System NUR für den internen Betreiber/Admin.
+   NIEMALS an Kunden ausliefern.
+     INHALT:  product/ (ohne Tests/keygen/Secrets) + b2bbot/ (Engine) +
+              start_operator.bat, start_ui.bat, requirements.txt, SETUP.md
+     RAUS:    product_config.json/product_smtp.json/mandanten.json (Secrets),
+              keygen.py, jede .env*, output/, data/, **/__pycache__/, *.pyc, Tests
 
-Was NICHT ins Paket kommt:
-  product_config.json, product_smtp.json  (Secrets)
-  product/licensing/keygen.py             (Seller-only)
-  **/__pycache__/, *.pyc, *.pyo
-  .git/, .env
-  product/data/                           (Laufzeit-Daten)
-  product/setup/test_*.py                 (Entwickler-Tests)
-  product/*/test_*.py
+2) KUNDEN-/SAAS-PAKET  →  dist/rebellsystem-saas-v{version}.zip
+   SaaS-sicher: enthält KEINEN Quellcode aus dem Repo — ausschließlich
+   generierte Onboarding-/Konfig-/Doku-/Manifest-Artefakte. Dadurch ist
+   strukturell garantiert, dass nichts Proprietäres durchrutscht:
+     KEINE Engine / kein b2bbot, KEIN proprietärer Code (Akquise/Reply/
+     Follow-up/CRM/Handoff), KEIN Betreiber-Dashboard (Setup/SMTP/Token/
+     Engine-Felder), KEINE Secrets, KEINE .env, KEINE Output-Daten.
+   Bis ein echtes Kunden-Frontend + Connector gebaut ist, ist das Kundenpaket
+   bewusst ein reines Onboarding-/Konfigurations-Paket.
 """
 from __future__ import annotations
 
@@ -35,12 +38,18 @@ from pathlib import Path
 
 _ROOT = Path(__file__).parent.parent.parent
 
+# Projekt-Root ins sys.path, damit `python product/packaging/package.py` direkt
+# (als Skript) läuft — sonst schlägt `from product.version import VERSION` fehl.
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 # ── Ausschluss-Regeln ────────────────────────────────────────────────────────
 
 # Exakte Dateinamen die nie ins Paket kommen
 _AUSSCHLUSS_NAMEN: frozenset[str] = frozenset({
     "product_config.json",
     "product_smtp.json",
+    "mandanten.json",      # Mandanten-Register (Kunden-Secrets) — nie ins Paket
     ".env",
     ".env.local",
     "keygen.py",
@@ -79,6 +88,9 @@ def _ausgeschlossen(pfad: Path, root: Path) -> bool:
     """True wenn diese Datei/Verzeichnis aus dem Paket ausgeschlossen wird."""
     name = pfad.name
     if name in _AUSSCHLUSS_NAMEN:
+        return True
+    # Jede Umgebungs-Datei (.env, .env.local, .env.example, …) bleibt draußen.
+    if name.startswith(".env"):
         return True
     if pfad.suffix in _AUSSCHLUSS_SUFFIXE:
         return True
@@ -220,21 +232,29 @@ pause
 
 
 def _erstelle_manifest(version: str, paket_name: str, stats: dict) -> dict:
+    """Manifest des BETREIBER-Pakets (vollständig lauffähig, interner Gebrauch)."""
     return {
         "paket": paket_name,
+        "paket_typ": "betreiber",
+        "hinweis": (
+            "BETREIBER-PAKET — vollständig lauffähig, NUR für internen "
+            "Betreiber/Admin-Gebrauch. NIEMALS an Kunden ausliefern."
+        ),
         "version": version,
         "erstellt": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "dateien_gesamt": stats.get("gesamt", 0),
         "dateien_uebersprungen": stats.get("uebersprungen", 0),
         "komponenten": [
             "operator", "bridge", "telegram", "ui",
-            "setup", "licensing", "closer", "packaging",
+            "setup", "licensing", "closer", "packaging", "engine (b2bbot)",
         ],
         "nicht_enthalten": [
             "product_config.json (Secrets)",
             "product_smtp.json (Secrets)",
+            "mandanten.json (Kunden-Secrets)",
             "product/licensing/keygen.py (Seller-only)",
-            "product/data/ (Laufzeit-Daten)",
+            ".env* (Umgebungs-Dateien)",
+            "product/data/, output/ (Laufzeit-/Output-Daten)",
             "**/__pycache__/ (temporäre Dateien)",
         ],
     }
@@ -243,16 +263,20 @@ def _erstelle_manifest(version: str, paket_name: str, stats: dict) -> dict:
 # ── Haupt-Funktion ────────────────────────────────────────────────────────────
 
 def paket_erstellen(output_dir: Path | None = None) -> Path:
-    """Erstellt das Kunden-Paket. Gibt den Pfad zur ZIP-Datei zurück."""
+    """Erstellt das BETREIBER-Paket (vollständig lauffähig, interner Gebrauch).
+
+    Enthält product/ + die Engine (b2bbot/), aber keine Secrets/.env/keygen/
+    output. NIEMALS an Kunden ausliefern — dafür gibt es kunden_paket_erstellen().
+    Gibt den Pfad zur ZIP-Datei zurück."""
     from product.version import VERSION
 
-    paket_name = f"hermes-sales-operator-v{VERSION}"
+    paket_name = f"rebellsystem-operator-v{VERSION}"
     ziel_dir = output_dir or (_ROOT / "dist")
     ziel_dir.mkdir(parents=True, exist_ok=True)
 
     zip_pfad = ziel_dir / f"{paket_name}.zip"
 
-    print(f"\n  Erstelle Paket: {zip_pfad.name}")
+    print(f"\n  Erstelle BETREIBER-Paket: {zip_pfad.name}")
     print(f"  Quelle:         {_ROOT}")
 
     gesamt = 0
@@ -303,15 +327,143 @@ def paket_erstellen(output_dir: Path | None = None) -> Path:
     return zip_pfad
 
 
+# ── Kunden-/SaaS-Paket (rein generiert — KEIN Quellcode aus dem Repo) ──────────
+
+def _erstelle_kunden_readme(version: str) -> str:
+    return f"""\
+# Rebellsystem — SaaS-Onboarding
+
+Version: {version}
+
+Dies ist das **Kunden-Onboarding-Paket** der Rebellsystem-Akquise-Plattform.
+Es enthält bewusst **keine** Software, die bei dir lokal läuft:
+
+- **kein** Engine-/Akquise-Code
+- **keine** Zugangsdaten oder Secrets
+- **keine** Betreiber-Werkzeuge
+
+Die Plattform läuft als Service beim Betreiber. Du arbeitest später über ein
+eigenes Kunden-Frontend bzw. einen Connector mit deiner isolierten Instanz —
+dieser Teil wird separat bereitgestellt.
+
+## Was du hier findest
+
+- `konfiguration.example.json` — Vorlage für deine Onboarding-Angaben
+  (Lizenzschlüssel, Zielgruppen-/Regions-Vorbelegung, Anzeige-Einstellungen).
+- `MANIFEST.json` — was dieses Paket enthält und was bewusst nicht.
+
+## Nächste Schritte
+
+1. Fülle `konfiguration.example.json` mit deinen Wunsch-Vorgaben aus und
+   schicke sie deinem Ansprechpartner.
+2. Du erhältst deinen Zugang zur Plattform (Telegram und/oder Web).
+3. Dein Akquise-Agent wird isoliert für dich eingerichtet.
+
+## Wichtig
+
+- Es wird **nie automatisch** versendet — jede Aktion (Senden, Termin) braucht
+  deine ausdrückliche Freigabe.
+- Du siehst nur deine eigenen Daten. Kein Zugriff auf andere Mandanten.
+"""
+
+
+def _erstelle_kunden_konfig() -> str:
+    """Kunden-Onboarding-Vorlage — NUR kundenseitige Felder, KEINE Betreiber-/
+    Engine-/SMTP-/Token-Felder."""
+    vorlage = {
+        "lizenzschluessel": "",
+        "anzeige_name": "",
+        "standard_zielgruppe": "",
+        "standard_region": "",
+        "branche": "",
+        "benachrichtigung": {
+            "kanal": "telegram",
+            "sprache": "de",
+        },
+        "_hinweis": (
+            "Onboarding-Vorlage. Keine Zugangsdaten/Secrets hier eintragen — "
+            "die werden separat und sicher mit dem Betreiber abgestimmt."
+        ),
+    }
+    return json.dumps(vorlage, ensure_ascii=False, indent=2)
+
+
+def _erstelle_kunden_manifest(version: str) -> dict:
+    """Manifest des KUNDEN-/SAAS-Pakets (SaaS-sicher, ohne Quellcode)."""
+    return {
+        "paket": f"rebellsystem-saas-v{version}",
+        "paket_typ": "kunde",
+        "hinweis": (
+            "KUNDEN-/SAAS-PAKET — SaaS-sicher. Enthält keinen Quellcode, keine "
+            "Engine, kein Betreiber-Dashboard, keine Secrets. Reines Onboarding-/"
+            "Konfigurations-Paket bis ein echtes Kunden-Frontend/Connector folgt."
+        ),
+        "version": version,
+        "erstellt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "enthalten": [
+            "README.md (Onboarding)",
+            "konfiguration.example.json (Kunden-Vorlage)",
+            "MANIFEST.json",
+        ],
+        "nicht_enthalten": [
+            "b2bbot / Engine-Code",
+            "ClouseAgent / Closer-Code",
+            "proprietäre Akquise-/Reply-/Follow-up-/CRM-/Handoff-Logik",
+            "Betreiber-Dashboard (Setup/SMTP/Token/Engine-Felder)",
+            "interne Bot-Dateien",
+            "Secrets / .env / Output-Daten / Lizenzgenerator",
+            "jeglicher .py-Quellcode",
+        ],
+    }
+
+
+def kunden_paket_erstellen(output_dir: Path | None = None) -> Path:
+    """Erstellt das KUNDEN-/SAAS-Paket. SaaS-sicher: schreibt ausschließlich
+    generierte Artefakte ins ZIP — es wird KEINE Repo-Datei kopiert, daher kann
+    strukturell nichts Proprietäres durchrutschen."""
+    from product.version import VERSION
+
+    paket_name = f"rebellsystem-saas-v{VERSION}"
+    ziel_dir = output_dir or (_ROOT / "dist")
+    ziel_dir.mkdir(parents=True, exist_ok=True)
+    zip_pfad = ziel_dir / f"{paket_name}.zip"
+
+    print(f"\n  Erstelle KUNDEN-Paket:    {zip_pfad.name}")
+
+    with zipfile.ZipFile(zip_pfad, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        zf.writestr(f"{paket_name}/README.md", _erstelle_kunden_readme(VERSION))
+        zf.writestr(f"{paket_name}/konfiguration.example.json", _erstelle_kunden_konfig())
+        zf.writestr(
+            f"{paket_name}/MANIFEST.json",
+            json.dumps(_erstelle_kunden_manifest(VERSION), ensure_ascii=False, indent=2),
+        )
+
+    groesse_kb = zip_pfad.stat().st_size / 1024
+    print(f"  ✓ {zip_pfad.name} ({groesse_kb:.1f} KB, nur generierte Artefakte)")
+    return zip_pfad
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────────
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Rebellsystem Sales Operator — Paket erstellen")
+    parser = argparse.ArgumentParser(
+        description="Rebellsystem — Pakete erstellen (Betreiber + Kunde, strikt getrennt)"
+    )
     parser.add_argument("--output", type=Path, default=None,
                         help="Ziel-Verzeichnis (Standard: ./dist/)")
+    parser.add_argument("--typ", choices=("beide", "betreiber", "kunde"),
+                        default="beide", help="Welche(s) Paket(e) bauen (Standard: beide)")
     args = parser.parse_args(argv)
 
     try:
-        zip_pfad = paket_erstellen(args.output)
-        print(f"\n  Fertig: {zip_pfad}")
+        gebaut: list[Path] = []
+        if args.typ in ("beide", "betreiber"):
+            gebaut.append(paket_erstellen(args.output))
+        if args.typ in ("beide", "kunde"):
+            gebaut.append(kunden_paket_erstellen(args.output))
+        print("\n  Fertig:")
+        for p in gebaut:
+            print(f"    - {p}")
         return 0
     except Exception as e:
         print(f"\n  ! Fehler: {e}", file=sys.stderr)

@@ -372,7 +372,21 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        - product/telegram/test_bot_routing.py: Mock-TG + Mock-Runner/-Dialog;
          belegt Single-Tenant unverändert, A↛B-Isolation, fremde Chat-ID
          abgelehnt, Operator /plattform.
-    F7b Paket + Live-Check ........................... ⬜
+    F7b Paket + Live-Check (SaaS-Trennung) .......... ✅ (+7 Tests)
+       - check_install.py: startbereit ✓ (Lizenz-Secret = nur Hinweis).
+       - package.py: Fix sys.path (lief vorher nicht als Skript) + ZWEI strikt
+         getrennte Pakete (Kunden-Vorgabe, kein Refactor, nur Paketierung):
+         · BETREIBER  dist/rebellsystem-operator-v{V}.zip — voll lauffähig,
+           product/ + Engine b2bbot/, OHNE Secrets/.env*/mandanten.json/keygen/
+           output/Tests. Manifest paket_typ='betreiber', NIE an Kunden.
+         · KUNDE/SAAS dist/rebellsystem-saas-v{V}.zip — rein GENERIERTE
+           Artefakte (README/konfiguration.example.json/MANIFEST), NULL
+           Quellcode → strukturell leak-frei: kein b2bbot/Closer, kein
+           proprietärer Code, kein Betreiber-Dashboard, keine Secrets/.env.
+           Manifest paket_typ='kunde'. (Echtes Frontend/Connector später.)
+       - Branding: Hermes-Reste in package.py entfernt (Namen/Docstring/Manifest).
+       - Verifiziert: Betreiber-ZIP enthält b2bbot/mine.py + 0 Secrets; Kunden-ZIP
+         = nur 3 generierte Dateien, 0 .py, 0 Engine/Dashboard/Token/SMTP.
     F7c /code-review ultra (User löst aus) ........... ⬜
     F7d Findings fixen ............................... ⬜
 ```

@@ -23,6 +23,8 @@ from product.packaging.check_install import (
 from product.packaging.package import (
     _ausgeschlossen, _erstelle_setup_md, _erstelle_requirements_txt,
     _erstelle_manifest, _erstelle_start_ui_bat,
+    paket_erstellen, kunden_paket_erstellen,
+    _erstelle_kunden_konfig, _erstelle_kunden_manifest,
 )
 
 
@@ -261,6 +263,85 @@ class TestZipErstellung(unittest.TestCase):
             assert manifest["dateien_gesamt"] > 0
 
 
+# ── 6. SaaS-Trennung: Betreiber- vs. Kunden-Paket (F7b) ──────────────────────
+
+class TestSaaSTrennung(unittest.TestCase):
+    """Belegt: zwei strikt getrennte Pakete, das Kundenpaket ist SaaS-sicher."""
+
+    # Verzeichnisse/Dateien, die im KUNDENPAKET niemals vorkommen dürfen
+    _VERBOTEN_KUNDE = (
+        "b2bbot", "clouseagent", "mine.py", "dashboard.html", "server.py",
+        "engine_bridge", "/agent/", "/operator/", "/closer/", "/telegram/",
+        "product_config", "product_smtp", "mandanten.json", "keygen",
+        ".env", "smtp", "bot_token", "api_key",
+    )
+
+    def test_betreiber_paket_enthaelt_engine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_pfad = paket_erstellen(Path(tmp))
+            self.assertIn("rebellsystem-operator", zip_pfad.name)
+            with zipfile.ZipFile(zip_pfad) as zf:
+                namen = zf.namelist()
+                manifest = json.loads(zf.read(next(n for n in namen if n.endswith("MANIFEST.json"))))
+            # Betreiber = vollständig lauffähig → Engine MUSS drin sein
+            assert any(n.endswith("b2bbot/mine.py") for n in namen), "Engine fehlt im Betreiber-Paket"
+            assert manifest["paket_typ"] == "betreiber"
+            # aber NIE Secrets/.env*
+            assert not any("product_config.json" in n for n in namen)
+            assert not any(Path(n).name.startswith(".env") for n in namen)
+            assert not any("mandanten.json" in n for n in namen)
+
+    def test_kunde_paket_nur_generierte_artefakte(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_pfad = kunden_paket_erstellen(Path(tmp))
+            self.assertIn("rebellsystem-saas", zip_pfad.name)
+            with zipfile.ZipFile(zip_pfad) as zf:
+                namen = zf.namelist()
+            basisnamen = sorted(Path(n).name for n in namen)
+            assert basisnamen == ["MANIFEST.json", "README.md", "konfiguration.example.json"], basisnamen
+
+    def test_kunde_paket_kein_quellcode(self):
+        """Kein einziges .py — strukturell garantiert leak-frei."""
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_pfad = kunden_paket_erstellen(Path(tmp))
+            with zipfile.ZipFile(zip_pfad) as zf:
+                namen = zf.namelist()
+            assert not any(n.endswith(".py") for n in namen)
+
+    def test_kunde_paket_nichts_proprietaeres(self):
+        """Keine proprietären/internen Pfade im Kundenpaket (Namens-Ebene).
+
+        Hinweis: Datei-INHALTE (README/MANIFEST) dürfen Begriffe wie 'SMTP/Token'
+        durchaus nennen — nämlich um zu DOKUMENTIEREN, dass sie NICHT enthalten
+        sind. Die Konfig-Felder selbst prüft test_kunde_konfig_nur_kundenfelder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_pfad = kunden_paket_erstellen(Path(tmp))
+            with zipfile.ZipFile(zip_pfad) as zf:
+                inhalt = "\n".join(zf.namelist()).lower()
+        for verboten in self._VERBOTEN_KUNDE:
+            assert verboten not in inhalt, f"Verbotener Pfad im Kundenpaket: {verboten}"
+
+    def test_kunde_manifest_typ(self):
+        m = _erstelle_kunden_manifest("1.0.0")
+        assert m["paket_typ"] == "kunde"
+        assert "1.0.0" in m["paket"]
+        assert any("Engine" in x or "b2bbot" in x for x in m["nicht_enthalten"])
+
+    def test_kunde_konfig_nur_kundenfelder(self):
+        cfg = json.loads(_erstelle_kunden_konfig())
+        assert "lizenzschluessel" in cfg
+        # KEINE Betreiber-/Engine-/Secret-Felder
+        for feld in ("bot_token", "api_key", "engine_dir", "owner_chat_id", "smtp"):
+            assert feld not in cfg, f"Betreiber-Feld in Kunden-Konfig: {feld}"
+
+    def test_beide_pakete_unterschiedliche_namen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            op = paket_erstellen(Path(tmp))
+            ku = kunden_paket_erstellen(Path(tmp))
+            assert op.name != ku.name
+            assert op.exists() and ku.exists()
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -271,7 +352,7 @@ if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for cls in [TestVersion, TestCheckInstall, TestAusschlusssLogik,
-                TestGenerierteTexte, TestZipErstellung]:
+                TestGenerierteTexte, TestZipErstellung, TestSaaSTrennung]:
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
     runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
