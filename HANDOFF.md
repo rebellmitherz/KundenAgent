@@ -294,8 +294,14 @@ D: Agent in der UI + Auftrag aus Browser  ✅ (commit e7638dd, +5 Tests, 314 tot
   - dashboard.html: Tabs Kampagne (Trichter), Antworten (Detail-Karten), Neuer Auftrag
   - Hinweis: Browser muss http://127.0.0.1:8767 sein (IPv4), nicht localhost (IPv6)
 
-⬜ OFFEN:
-  E (NICHT freigegeben): aktiver IMAP-Abruf (process-replies) — sicherheitskritisch,
-     nur scoped REPLY_AUTO_SEND=false bauen. Heute liest der Bot nur bereits
-     abgerufene Antworten (reply_queue.json), prüft das Postfach nicht selbst.
+E: Aktiver Antwort-Abruf (fail-closed) ... ✅ (commit 6b21cba, +8 Tests, 322 total)
+  - bridge.antworten_abrufen: process-replies, ALLE Auto-Send-Gates scoped AUS
+    (REPLY_DRY_RUN=1 + REPLY_AUTO_SEND=false + ... ) → abrufen, nie senden
+  - watcher auto_abruf=True: Bot holt Antworten alle 5 Min selbst (vollautomatisch)
+  - Telegram 'Antworten abrufen' + UI-Button + POST /api/agent/antworten-abrufen
+  - Faehigkeit zum Auto-Reply bleibt in der Engine (Flags), Produktregel haelt sie aus
+Branding: Hermes → Rebellsystem ......... ✅ (commit 6b21cba, nur Sichtflaechen;
+  Guardrail-Hinweise 'Hermes Prime/OpenClaw/Sandra' bewusst unveraendert)
+
+ALLE PHASEN A–E FERTIG. 322 Tests grün.
 ```
