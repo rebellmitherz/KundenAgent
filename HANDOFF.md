@@ -280,4 +280,18 @@ B     Loops schließen (Send/Reply/Followup) ✅ FERTIG
 C     Kampagnen-Gedächtnis ............... ✅ (commit c9198f9, +26 Tests)
 D     Tore + Push-Meldungen .............. ✅ (commit f09a2b2, +13 Tests)
 Closer Telegram-Steuerung ............... ✅ (commit cce0cdc, +8 Tests, 294 total)
+
+NACH-ÜBERGABE (Live-Test mit echten Daten, 05.06.):
+Antwort-Details + Termin abschließen .... ✅ (commit 9391240, +15 Tests, 309 total)
+  - bridge.antworten_lesen: +von/postfach/gesendet_am/auto_antwort (keine Roh-IDs)
+  - replies: termin_detail_bericht (Original-Mail + voller Text) + antwort_detail_bericht
+  - agent/erledigt.py: erledigte Termine agent-lokal, raus aus Push/Überblick/Detail
+  - Telegram-Befehle: 'Mail zeigen', 'Termin aufbereiten', 'Termin abschließen <Firma>'
+Desktop-Button 'Hermes UI' .............. ✅ (commit cf88262, start_ui.bat öffnet Browser)
+
+⬜ OFFEN (vom User freigegeben, in Arbeit):
+  D-UI: UI zeigt Agent NICHT (kein Antworten-/Kampagnen-Tab, kein Auftrag-Formular).
+        Server-Endpunkte existieren (/api/agent/antworten|funnel|laeufe), nur Frontend
+        fehlt. Nächster Schritt: dashboard.html erweitern + POST /api/agent/auftrag.
+  E (NICHT freigegeben): aktiver IMAP-Abruf (process-replies) — sicherheitskritisch.
 ```
