@@ -349,6 +349,11 @@ PHASE F — vom getesteten System zum verkauften Produkt (5k/Monat-Reife):
        Funnel, ohne-Bezug-Antworten) + plattform_report_text() Gesamtsicht,
        sortiert nach Termin-Signalen. Hero-Metrik = geprüfte Termine, nicht Volumen.
      - Hero-Metrik: geprüfte Termine (F1) je Kunde; Cross-Mandanten-Übersicht.
-  F6 Branding + Lizenz härten (Mandanten-Lizenz) ...... ⬜ (Sonnet 4.6 / niedrig)
+  F6 Branding + Lizenz-Secret härten .................. ✅
+     - Alle 'Hermes Sales Operator' → 'Rebellsystem Sales Operator' (onboarding,
+       packaging, check_install, features, license).
+     - license.py: Secret aus REBELLSYSTEM_LICENSE_SECRET; produktionsmodus=True
+       wirft RuntimeError wenn Variable fehlt. secret_gesetzt() für Check-Install.
+     - check_install: neuer Lizenz-Secret-Check (Hinweis, kein Startblocker).
   F7 Live-Abnahme + Paket + /code-review ultra ........ ⬜ (ultrahigh)
 ```

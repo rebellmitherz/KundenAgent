@@ -1,4 +1,4 @@
-"""Feature-Flags und Paket-Definitionen für Hermes Sales Operator.
+"""Feature-Flags und Paket-Definitionen für Rebellsystem Sales Operator.
 
 Drei Pakete:
   STARTER    — Suche + Berichte

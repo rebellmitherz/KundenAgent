@@ -1,13 +1,13 @@
-"""Lizenzprüfung für Hermes Sales Operator — NUR Verifikation.
+"""Lizenzprüfung für Rebellsystem Sales Operator — NUR Verifikation.
 
 Format: BASE32(payload).HMAC12
 payload: "kunde|plan|ablauf_timestamp"
   ablauf_timestamp: 0 = unbegrenzt, sonst Unix-Timestamp
 
-WICHTIG VOR AUSLIEFERUNG:
-  _SECRET muss geändert und GEHEIM gehalten werden.
-  Alternativ: Umgebungsvariable HERMES_LICENSE_SECRET setzen.
+PFLICHT VOR AUSLIEFERUNG:
+  Umgebungsvariable REBELLSYSTEM_LICENSE_SECRET setzen (min. 32 Zeichen).
   Wer das SECRET nicht kennt, kann keine gültigen Schlüssel erzeugen.
+  Ohne gesetzte Variable startet die Produktion NICHT (hartes Tor).
 
 Generierung von Schlüsseln: NUR über keygen.py (NICHT im Kundenpaket).
 """
@@ -22,19 +22,37 @@ from dataclasses import dataclass, field
 
 from product.licensing.features import Feature, features_fuer_plan, ALLE_FEATURES
 
-# Vor Verkauf ändern und geheim halten.
-# Alternativ: Umgebungsvariable HERMES_LICENSE_SECRET setzen.
-_SECRET_DEFAULT = b"HERMES-OPERATOR-CHANGE-BEFORE-SHIPPING-2026"
+_SECRET_ENV = "REBELLSYSTEM_LICENSE_SECRET"
+# Nur für Tests/Entwicklung — in Produktion MUSS die Env-Var gesetzt sein.
+_SECRET_FALLBACK = b"REBELLSYSTEM-CHANGE-BEFORE-SHIPPING-2026"
 
 
-def _secret() -> bytes:
-    env = os.environ.get("HERMES_LICENSE_SECRET", "")
-    return env.encode("utf-8") if env else _SECRET_DEFAULT
+def _secret(produktionsmodus: bool = False) -> bytes:
+    """Liest das Lizenz-Secret aus der Umgebungsvariable.
+
+    Im Produktionsmodus (produktionsmodus=True) wird ein harter Fehler
+    geworfen, wenn die Variable nicht gesetzt ist — so kann kein Kunde
+    mit dem Entwicklungs-Secret ausgeliefert werden.
+    """
+    env = os.environ.get(_SECRET_ENV, "")
+    if env:
+        return env.encode("utf-8")
+    if produktionsmodus:
+        raise RuntimeError(
+            f"SICHERHEITSFEHLER: Umgebungsvariable '{_SECRET_ENV}' ist nicht gesetzt. "
+            "Bitte vor Auslieferung setzen (min. 32 Zeichen)."
+        )
+    return _SECRET_FALLBACK
 
 
 def _sign(payload: str) -> str:
     mac = hmac.new(_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return mac[:12]
+
+
+def secret_gesetzt() -> bool:
+    """True wenn das Produktions-Secret korrekt gesetzt ist (für Check-Install)."""
+    return bool(os.environ.get(_SECRET_ENV, ""))
 
 
 # ── Datenklasse ──────────────────────────────────────────────────────────────

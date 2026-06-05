@@ -1,4 +1,4 @@
-"""Installations-Checker für Hermes Sales Operator.
+"""Installations-Checker für Rebellsystem Sales Operator.
 
 Läuft auf Kundenseite beim ersten Start oder auf Anforderung.
 Prüft: Python-Version, Pflicht-Dateien, Engine-Pfad, Schreibrechte.
@@ -122,6 +122,24 @@ def check_config() -> dict:
     }
 
 
+def check_license_secret() -> dict:
+    """Prüft, ob das Produktions-Secret gesetzt ist (nur als Hinweis — kein Block)."""
+    try:
+        from product.licensing.license import secret_gesetzt
+        ok = secret_gesetzt()
+        return {
+            "name": "Lizenz-Secret",
+            "ok": ok,
+            "detail": "gesetzt" if ok else "NICHT gesetzt (Entwicklungsmodus)",
+            "hinweis": (
+                "" if ok else
+                "Umgebungsvariable REBELLSYSTEM_LICENSE_SECRET setzen vor Auslieferung."
+            ),
+        }
+    except Exception as e:
+        return {"name": "Lizenz-Secret", "ok": False, "detail": "", "hinweis": str(e)}
+
+
 def check_version() -> dict:
     try:
         from product.version import VERSION, BUILD_DATE
@@ -151,11 +169,13 @@ def installation_pruefen() -> dict:
         check_engine(),
         check_schreibrechte(),
         check_config(),
+        check_license_secret(),
     ]
     alle_ok = all(c["ok"] for c in checks)
     kritisch_ok = all(
         c["ok"] for c in checks
-        if c["name"] not in {"Konfiguration"}  # Config ist optional beim ersten Start
+        # Config + Lizenz-Secret sind optional beim ersten Start / Entwicklung
+        if c["name"] not in {"Konfiguration", "Lizenz-Secret"}
     )
     return {
         "gesamt_ok": alle_ok,
@@ -167,7 +187,7 @@ def installation_pruefen() -> dict:
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Hermes Sales Operator — Installations-Check")
+    parser = argparse.ArgumentParser(description="Rebellsystem Sales Operator — Installations-Check")
     parser.add_argument("--json", action="store_true", help="Ausgabe als JSON")
     args = parser.parse_args(argv)
 

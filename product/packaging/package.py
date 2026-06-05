@@ -134,7 +134,7 @@ def _datei_zu_zip(pfad: Path, root: Path, zf: zipfile.ZipFile, zip_prefix: str) 
 
 def _erstelle_setup_md(version: str) -> str:
     return f"""\
-# Hermes Sales Operator — Einrichtung
+# Rebellsystem Sales Operator — Einrichtung
 
 Version: {version}
 
@@ -180,7 +180,7 @@ Falls du einen Lizenz-Schlüssel erhalten hast:
 
 def _erstelle_requirements_txt() -> str:
     return """\
-# Hermes Sales Operator — Abhängigkeiten
+# Rebellsystem Sales Operator — Abhängigkeiten
 #
 # Pflicht:
 requests>=2.28
@@ -198,7 +198,7 @@ python-dotenv>=1.0
 def _erstelle_start_ui_bat() -> str:
     return """\
 @echo off
-:: Hermes Sales Operator — Mini-UI starten
+:: Rebellsystem Sales Operator — Mini-UI starten
 :: Oeffnet http://127.0.0.1:8767 im Browser
 
 setlocal
@@ -304,7 +304,7 @@ def paket_erstellen(output_dir: Path | None = None) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Hermes Sales Operator — Paket erstellen")
+    parser = argparse.ArgumentParser(description="Rebellsystem Sales Operator — Paket erstellen")
     parser.add_argument("--output", type=Path, default=None,
                         help="Ziel-Verzeichnis (Standard: ./dist/)")
     args = parser.parse_args(argv)

@@ -1,4 +1,4 @@
-"""Geführtes Erststart-Onboarding für Hermes Sales Operator.
+"""Geführtes Erststart-Onboarding für Rebellsystem Sales Operator.
 
 Erzeugt product_config.json und optional product_smtp.json sicher lokal.
 
@@ -260,7 +260,7 @@ def setup_smtp(ziel: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Hermes Sales Operator — Ersteinrichtung",
+        description="Rebellsystem Sales Operator — Ersteinrichtung",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
