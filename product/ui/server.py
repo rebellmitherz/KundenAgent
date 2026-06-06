@@ -427,6 +427,12 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+        # Serverseitige Obergrenze (Mini-Patch): erlaubt 1..50, sonst Default 20.
+        try:
+            limit = max(1, min(int(limit), 50))
+        except (TypeError, ValueError):
+            limit = 20
+
         if not _bridge:
             self._json({"ok": False, "meldung": "Engine nicht verbunden."})
             return

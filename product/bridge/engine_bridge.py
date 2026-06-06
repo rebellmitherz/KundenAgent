@@ -565,6 +565,13 @@ class EngineBridge:
                 ),
             )
 
+        # Harte Obergrenze (Mini-Patch): nie weniger als 1, nie mehr als 50 Mails
+        # pro Freigabe — schuetzt den realen Versand unabhaengig vom Aufrufer.
+        try:
+            limit = max(1, min(int(limit), 50))
+        except (TypeError, ValueError):
+            limit = 20
+
         # Schritt 1: Approve (markiert nur approved_for_send — kein SMTP).
         rc1, out1 = self._run(
             ["--outreach", "approve", "--outreach-limit", str(limit)],

@@ -1137,6 +1137,7 @@ let _alleLeads = [];
 let _alleMails = [];
 let _autoRefresh = null;
 let _freigabeLimitAktuell = 20;
+let _freigabeSendbar = 0;
 
 // ─── Tab-Switching ────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(t => {
@@ -1389,10 +1390,15 @@ function renderFreigabe(d) {
   if (!d) { el.innerHTML = emptyState('🔒', 'Keine Daten', ''); return; }
 
   const sendbar  = d.pipeline_sendbar || 0;
-  const approved = (d.rohdaten && d.rohdaten.approved) || 0;
   const gesendet = (d.rohdaten && d.rohdaten.sent_total) || 0;
-  const limit    = Math.min(sendbar, 20);
-  _freigabeLimitAktuell = limit;
+  _freigabeSendbar = sendbar;
+
+  // Auswählbare Stückzahl: 5/10/20/50 (Default 20, max 50). Effektiv wird nie
+  // mehr versendet als "sendbar" (Math.min). Server + Bridge clampen zusätzlich.
+  const optionen = [5, 10, 20, 50];
+  const wunsch   = 20;
+  const effektiv = Math.min(wunsch, sendbar);
+  _freigabeLimitAktuell = effektiv;
 
   el.innerHTML = `
     <div class="freigabe-wrap">
@@ -1409,20 +1415,29 @@ function renderFreigabe(d) {
         </div>
         <div class="freigabe-row">
           <span class="freigabe-key">Jetzt freizugeben</span>
-          <span class="freigabe-val amber">${limit}</span>
+          <span class="freigabe-val amber" id="freigabeNowVal">${effektiv}</span>
         </div>
       </div>
 
       ${sendbar > 0 ? `
+      <div class="freigabe-row" style="margin:14px 0;">
+        <span class="freigabe-key">Anzahl Mails senden</span>
+        <select id="freigabeLimitSelect" class="setup-input"
+                style="width:auto;min-width:90px" onchange="onFreigabeLimitChange()">
+          ${optionen.map(o => `<option value="${o}"${o === wunsch ? ' selected' : ''}>${o}</option>`).join('')}
+        </select>
+      </div>
+
       <div class="freigabe-hinweis">
-        ⚠️ Nach Klick auf „Freigabe erteilen" werden <strong>${limit} Mails</strong>
+        ⚠️ Nach Klick auf „Freigabe erteilen" werden
+        <strong id="freigabeWarnNum">${effektiv} Mails</strong>
         tatsächlich versendet. Dieser Schritt ist nicht rückgängig zu machen.<br><br>
-        Prüfe vorher die Mail-Vorschau im Tab links.
+        Es wird nie mehr als „Sendbar" (${sendbar}) versendet. Prüfe vorher die Mail-Vorschau im Tab links.
       </div>
 
       <button class="freigabe-btn" id="freigabeBtn"
-              onclick="zeigFreigabeModal(${limit})">
-        ✉️ Freigabe erteilen — ${limit} Mails senden
+              onclick="zeigFreigabeModal(_freigabeLimitAktuell)">
+        ✉️ Freigabe erteilen — <span id="freigabeBtnNum">${effektiv}</span> Mails senden
       </button>` : `
       <div class="freigabe-hinweis" style="border-color:rgba(0,212,255,0.2);background:var(--cyan-dim);color:var(--cyan)">
         ℹ️ Keine Mails bereit zum Senden. Starte zuerst eine Suche über Telegram.
@@ -1430,6 +1445,20 @@ function renderFreigabe(d) {
 
       <div class="freigabe-result" id="freigabeResult"></div>
     </div>`;
+}
+
+// Dropdown-Auswahl im Freigabe-Tab → effektives Limit (1..50, nie > sendbar).
+function onFreigabeLimitChange() {
+  const sel = document.getElementById('freigabeLimitSelect');
+  if (!sel) return;
+  let val = parseInt(sel.value, 10) || 20;
+  val = Math.max(1, Math.min(val, 50));          // UI-seitig 1..50 absichern
+  const eff = Math.min(val, _freigabeSendbar);   // nie mehr als sendbar
+  _freigabeLimitAktuell = eff;
+  const setTxt = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+  setTxt('freigabeNowVal', eff);
+  setTxt('freigabeWarnNum', eff + ' Mails');
+  setTxt('freigabeBtnNum', eff);
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────
