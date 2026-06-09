@@ -13,6 +13,8 @@ fügt keine Sende-Pfade hinzu.
 from __future__ import annotations
 
 import threading
+import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -82,9 +84,23 @@ class AgentRunner:
                 ergebnis = self._baue_brain(auftrag).fuehre_aus()
                 if fertig_callback:
                     fertig_callback(ergebnis)
-            except Exception:
-                # Absturzsicher: der 'laeuft'-Datensatz bleibt, Fehler verschluckt.
-                pass
+            except Exception as exc:
+                # Fehler sichtbar machen + Lauf-Status auf "fehler" setzen
+                fehler_text = traceback.format_exc()
+                print(
+                    f"\n[runner] FEHLER in Hintergrund-Lauf {auftrag.auftrags_id[:8]}:\n"
+                    f"{fehler_text}",
+                    flush=True,
+                )
+                try:
+                    rec = self._speicher.lesen(auftrag.auftrags_id) or {}
+                    if rec:
+                        rec["status"] = "fehler"
+                        rec["fehler"] = str(exc)
+                        rec["aktualisiert_am"] = datetime.now().isoformat(timespec="seconds")
+                        self._speicher._schreiben(auftrag.auftrags_id, rec)
+                except Exception:
+                    pass
 
         threading.Thread(target=_arbeit, daemon=True).start()
         return auftrag.auftrags_id
