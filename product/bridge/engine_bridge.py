@@ -111,6 +111,21 @@ class EngineBridge:
         self._pruefen(auftrag, ErlaubteAktion.SUCHEN_AUFBEREITEN)
         auftrag.starten()
 
+        # Scrape-Budget an die Auftragsgröße koppeln. Ohne diese Variable scrapt
+        # die Engine pro Lauf mindestens 30 Websites (max(count, 30)) — bei nur
+        # wenigen gewünschten Leads ist das massiv überdimensioniert und der
+        # Hauptgrund für lange Laufzeiten / Hänger an toten Seiten. Wir setzen
+        # ein faires Budget (genug Puffer zum Filtern, aber gedeckelt) scoped auf
+        # genau diesen Such-Subprozess. Kein Versand, nur Suche.
+        try:
+            budget = min(max(int(auftrag.lead_anzahl) * 6, 12), 45)
+        except (TypeError, ValueError):
+            budget = 18
+
+        # Obergrenze: nach 6 Minuten hart abbrechen statt bis zu 1 Stunde zu
+        # blockieren. Eine tote/langsame Website darf den Lauf nicht einfrieren —
+        # lieber ehrlich als Fehler melden (UI zeigt dann 'fehler' statt ewig
+        # 'läuft'). Die Engine selbst sendet hierbei nichts (reine Suche).
         rc, ausgabe = self._run(
             [
                 "-i", auftrag.zielgruppe,
@@ -118,12 +133,30 @@ class EngineBridge:
                 "-n", str(auftrag.lead_anzahl),
                 "--mode", "local",
             ],
-            timeout=3600,
+            timeout=360,
+            extra_env={
+                "B2B_SCRAPE_BUDGET": str(budget),
+                # Pro-Lead-LinkedIn-Suche via DuckDuckGo abschalten: sie macht je
+                # Lead eine eigene SERP-Abfrage, wird nach wenigen Calls von
+                # DuckDuckGo rate-limitet und HÄNGT dann (httpx ohne hartes
+                # Timeout) — der dominante Grund für eingefrorene Läufe. LinkedIn-
+                # URLs sind nur optionales Beiwerk; Firma/E-Mail/Telefon/
+                # Ansprechpartner liefert die Suche auch ohne. Abschaltbar laut
+                # Engine via LINKEDIN_SERP_RESOLVE=0.
+                "LINKEDIN_SERP_RESOLVE": "0",
+            },
         )
 
         if rc != 0:
-            auftrag.fehler_setzen(ausgabe[-500:])
-            return EngineBrueckenErgebnis(ok=False, meldung=ausgabe[-500:])
+            kurz = ausgabe[-500:] if ausgabe else ""
+            if rc == -1 and "Zeit" in (ausgabe or ""):
+                kurz = (
+                    "Die Suche hat zu lange gedauert (über 6 Minuten) und wurde "
+                    "abgebrochen. Meist hängt eine langsame Website. Bitte erneut "
+                    "starten — oft läuft der nächste Versuch sauber durch."
+                )
+            auftrag.fehler_setzen(kurz)
+            return EngineBrueckenErgebnis(ok=False, meldung=kurz)
 
         status = self.status_lesen()
         return EngineBrueckenErgebnis(
