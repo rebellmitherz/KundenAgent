@@ -1051,6 +1051,7 @@ html, body {
     <div class="tab" data-view="freigabe">Freigabe</div>
     <div class="tab" data-view="auftrag" id="tab-auftrag">Neuer Auftrag</div>
     <div class="tab" data-view="closer" id="tab-closer">Closer</div>
+    <div class="tab" data-view="mandanten" id="tab-mandanten">Mandanten</div>
     <div class="tab" data-view="setup" id="tab-setup">Einrichtung</div>
   </div>
 
@@ -1113,6 +1114,11 @@ html, body {
     <!-- Closer View -->
     <div class="view" id="view-closer">
       <div id="closerContent"></div>
+    </div>
+
+    <!-- Mandanten View -->
+    <div class="view" id="view-mandanten">
+      <div id="mandantenContent"></div>
     </div>
 
     <!-- Setup View -->
@@ -2160,6 +2166,138 @@ function adminTokenSpeichern() {
     localStorage.removeItem('hso_admin_token');
     const msg = document.getElementById('tokenMsg');
     if (msg) msg.innerHTML = '<span style="color:var(--text2)">Token entfernt.</span>';
+  }
+}
+
+// ─── Mandanten ────────────────────────────────────────────────────────────
+document.getElementById('tab-mandanten').addEventListener('click', ladenMandanten);
+
+async function ladenMandanten() {
+  const el = document.getElementById('mandantenContent');
+  try {
+    const r = await fetch('/api/admin/mandanten', { headers: _adminHeaders({'Content-Type': undefined}) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.meldung || 'Fehler');
+    const mand = d.mandanten || [];
+    let html = `
+      <div style="max-width:600px">
+        <div class="setup-h2" style="margin-top:0">Kunden verwalten</div>
+        <div id="mandantenMsg"></div>
+
+        <div class="setup-h2" style="margin-top:28px">Neuen Kunden anlegen</div>
+        <form id="formMandant" onsubmit="mandantAnlegen(event)">
+          <div class="setup-form-row">
+            <label class="setup-label">Benutzername</label>
+            <input type="text" class="setup-input" id="m_benutzername" placeholder="z.B. acme-gmbh" required>
+          </div>
+          <div class="setup-form-row">
+            <label class="setup-label">Name (angezeigt)</label>
+            <input type="text" class="setup-input" id="m_name" placeholder="z.B. ACME GmbH">
+          </div>
+          <div class="setup-form-row">
+            <label class="setup-label">Passwort (mindestens 6 Zeichen)</label>
+            <input type="password" class="setup-input" id="m_passwort" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="setup-btn" id="btnMandantAdd">+ Kunde hinzufügen</button>
+        </form>
+
+        <div class="setup-h2" style="margin-top:28px">Bestehende Kunden</div>
+        <div id="mandantenList">`;
+
+    if (mand.length === 0) {
+      html += '<div style="color:var(--text3);padding:8px 0">Noch keine Kunden angelegt.</div>';
+    } else {
+      for (const m of mand) {
+        html += `
+          <div class="stat" style="margin-bottom:10px;padding:14px 16px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div class="stat-val" style="margin-bottom:2px;font-size:16px">${esc(m.name)}</div>
+                <div class="stat-key">${esc(m.benutzername)} ${m.ist_selbst ? '(du)' : ''}</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                ${!m.ist_selbst ? `<button class="setup-btn" style="padding:6px 12px;font-size:12px;margin:0" onclick="oeffnePWDialog('${esc(m.benutzername)}')">PW ändern</button>
+                <button class="setup-btn" style="padding:6px 12px;font-size:12px;margin:0;background:rgba(255,71,87,0.1);color:var(--red);border-color:var(--red)" onclick="mandantLoeschen('${esc(m.benutzername)}')">Löschen</button>` : ''}
+              </div>
+            </div>
+          </div>`;
+      }
+    }
+    html += '</div></div>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = emptyState('⚠️', 'Fehler beim Laden', String(e));
+  }
+}
+
+async function mandantAnlegen(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnMandantAdd');
+  const msg = document.getElementById('mandantenMsg');
+  btn.disabled = true;
+  btn.textContent = 'Erstelle…';
+  try {
+    const r = await fetch('/api/admin/mandanten', {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify({
+        benutzername: document.getElementById('m_benutzername').value.trim(),
+        name: document.getElementById('m_name').value.trim(),
+        passwort: document.getElementById('m_passwort').value,
+      }),
+    });
+    const d = await r.json();
+    msg.innerHTML = `<div class="freigabe-result ${d.ok ? 'ok' : 'err'}" style="display:block">${d.ok ? '✅' : '⚠️'} ${esc(d.meldung || '')}</div>`;
+    if (d.ok) {
+      document.getElementById('formMandant').reset();
+      setTimeout(() => ladenMandanten(), 1500);
+    }
+  } catch (e) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">Fehler: ${esc(String(e))}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '+ Kunde hinzufügen';
+}
+
+function oeffnePWDialog(benutzername) {
+  const pw = prompt(`Neues Passwort für "${benutzername}" (mindestens 6 Zeichen):`);
+  if (pw) {
+    if (pw.length < 6) {
+      alert('Passwort zu kurz.');
+      return;
+    }
+    mandantPWSetzen(benutzername, pw);
+  }
+}
+
+async function mandantPWSetzen(benutzername, pw) {
+  try {
+    const r = await fetch(`/api/admin/mandanten/${benutzername}`, {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify({ action: 'pw', passwort: pw }),
+    });
+    const d = await r.json();
+    alert(d.ok ? '✅ ' + d.meldung : '⚠️ ' + d.meldung);
+    if (d.ok) ladenMandanten();
+  } catch (e) {
+    alert('Fehler: ' + e);
+  }
+}
+
+async function mandantLoeschen(benutzername) {
+  if (!confirm(`Kunde "${benutzername}" wirklich löschen? Das kann nicht rückgängig gemacht werden.`)) return;
+  try {
+    const r = await fetch(`/api/admin/mandanten/${benutzername}`, {
+      method: 'POST',
+      headers: _adminHeaders(),
+      body: JSON.stringify({ action: 'delete' }),
+    });
+    const d = await r.json();
+    alert(d.ok ? '✅ ' + d.meldung : '⚠️ ' + d.meldung);
+    if (d.ok) ladenMandanten();
+  } catch (e) {
+    alert('Fehler: ' + e);
   }
 }
 </script>

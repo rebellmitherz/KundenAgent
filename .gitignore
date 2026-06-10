@@ -40,6 +40,9 @@ product/data/logs/
 product/data/output/
 product/data/agent/
 
+# Mandanten-Datenverzeichnisse (pro Kunde: product/data/<mandant_id>/) — nie einchecken
+product/data/*/
+
 # IDE / Agent-Werkzeuge
 .claude/
 .vscode/

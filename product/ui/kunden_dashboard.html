@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KundenAgent</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #070b14;
+  --bg2:       #0b1120;
+  --card:      #0d1526;
+  --card2:     #111d33;
+  --border:    #1a2a45;
+  --border2:   #243555;
+  --cyan:      #00d4ff;
+  --cyan-dim:  rgba(0,212,255,0.10);
+  --cyan-glow: rgba(0,212,255,0.30);
+  --green:     #00e676;
+  --green-dim: rgba(0,230,118,0.10);
+  --amber:     #ffab00;
+  --amber-dim: rgba(255,171,0,0.10);
+  --red:       #ff4757;
+  --text1:     #dce8f5;
+  --text2:     #7a93b8;
+  --text3:     #435470;
+  --radius:    14px;
+  --rsm:       8px;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; overflow: hidden; }
+
+.app { display: flex; flex-direction: column; height: 100vh; max-width: 1040px; margin: 0 auto; }
+
+/* Header */
+.header { display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 28px 0; flex-shrink: 0; }
+.logo-row { display: flex; align-items: center; gap: 10px; }
+.orb { width: 30px; height: 30px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #00eaff 0%, #00a8d4 50%, #005f8a 100%);
+  box-shadow: 0 0 14px var(--cyan-glow);
+  animation: pulse 3s ease-in-out infinite; flex-shrink: 0; }
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 12px var(--cyan-glow); transform: scale(1); }
+  50%      { box-shadow: 0 0 24px var(--cyan-glow); transform: scale(1.06); } }
+.logo-text { font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text2); }
+.logo-text span { color: var(--cyan); }
+.header-right { display: flex; align-items: center; gap: 14px; }
+.user-chip { font-size: 12px; color: var(--text3); background: var(--card2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; }
+.user-chip b { color: var(--text2); }
+.logout-btn { font-size: 12px; color: var(--text3); background: none;
+  border: 1px solid var(--border); border-radius: var(--rsm);
+  padding: 5px 12px; cursor: pointer; transition: color .15s, border-color .15s; }
+.logout-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; padding: 16px 28px 0;
+  border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { padding: 8px 18px; border-radius: var(--rsm) var(--rsm) 0 0;
+  font-size: 13px; font-weight: 500; color: var(--text3); cursor: pointer;
+  border: 1px solid transparent; border-bottom: none; transition: color .2s, background .2s;
+  letter-spacing: 0.04em; user-select: none; }
+.tab:hover { color: var(--text2); }
+.tab.active { color: var(--cyan); background: var(--card);
+  border-color: var(--border); border-bottom-color: var(--card); margin-bottom: -1px; }
+
+/* Content */
+.content { flex: 1; overflow-y: auto; padding: 24px 28px;
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+.content::-webkit-scrollbar { width: 5px; }
+.content::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.view { display: none; }
+.view.active { display: block; }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 22px; }
+.card-label { font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text3); margin-bottom: 12px; }
+
+/* Stats row */
+.stats-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+@media (max-width: 640px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: var(--rsm);
+  padding: 14px 16px; }
+.stat-val { font-size: 28px; font-weight: 700; color: var(--text1); line-height: 1; margin-bottom: 4px; }
+.stat-val.cyan  { color: var(--cyan); }
+.stat-val.green { color: var(--green); }
+.stat-val.amber { color: var(--amber); }
+.stat-key { font-size: 11px; color: var(--text3); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* Kampagne-Runs */
+.lauf { background: var(--card); border: 1px solid var(--border); border-radius: var(--rsm);
+  padding: 14px 18px; margin-bottom: 10px; display: flex; justify-content: space-between;
+  align-items: center; gap: 12px; }
+.lauf-ziel { font-size: 14px; font-weight: 600; color: var(--text1); }
+.lauf-sub  { font-size: 12px; color: var(--text2); margin-top: 3px; }
+.tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.tag-cyan  { background: var(--cyan-dim);  color: var(--cyan);  border: 1px solid rgba(0,212,255,0.2); }
+.tag-green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.tag-amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(255,171,0,0.2); }
+
+/* Funnel */
+.funnel-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.funnel-label { width: 170px; font-size: 13px; color: var(--text2); flex-shrink: 0; }
+.funnel-bar-bg { flex: 1; height: 20px; background: var(--bg2); border-radius: 6px; overflow: hidden; }
+.funnel-bar { height: 100%; background: linear-gradient(90deg, #005f8a, var(--cyan));
+  border-radius: 6px; transition: width .5s; min-width: 2px; }
+.funnel-bar.termin { background: linear-gradient(90deg, #00794d, var(--green)); }
+.funnel-num { width: 40px; text-align: right; font-size: 14px; font-weight: 700; color: var(--text1); }
+
+/* Leads */
+.leads-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.leads-count { font-size: 13px; color: var(--text3); }
+.leads-count span { color: var(--cyan); font-weight: 600; }
+.search-input { background: var(--card); border: 1px solid var(--border); border-radius: var(--rsm);
+  padding: 7px 14px; color: var(--text1); font-size: 13px; outline: none; width: 200px;
+  transition: border-color .2s; }
+.search-input::placeholder { color: var(--text3); }
+.search-input:focus { border-color: var(--cyan); }
+.leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px,1fr)); gap: 14px; }
+.lead-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; transition: border-color .2s, transform .15s; }
+.lead-card:hover { border-color: var(--border2); transform: translateY(-2px); }
+.lead-firma { font-size: 14px; font-weight: 600; color: var(--text1); margin-bottom: 8px; }
+.lead-detail { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.lead-icon { color: var(--text3); font-size: 11px; width: 14px; text-align: center; }
+.lead-phone { color: var(--green); }
+.score-badge { float: right; width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.score-high { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.25); }
+.score-mid  { background: var(--cyan-dim);  color: var(--cyan);  border: 1px solid rgba(0,212,255,0.25); }
+.score-low  { background: var(--border);    color: var(--text3); border: 1px solid var(--border2); }
+
+/* Neuer Auftrag Form */
+.form-wrap { max-width: 520px; }
+.form-hint { background: var(--cyan-dim); border: 1px solid rgba(0,212,255,0.2);
+  border-radius: var(--rsm); padding: 12px 16px; font-size: 13px; color: var(--cyan);
+  line-height: 1.6; margin-bottom: 20px; }
+.form-label { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text3); margin-bottom: 6px; margin-top: 14px; }
+.form-input { width: 100%; background: var(--card2); border: 1px solid var(--border2);
+  border-radius: var(--rsm); padding: 10px 14px; color: var(--text1);
+  font-size: 14px; font-family: inherit; outline: none; transition: border-color .2s; }
+.form-input:focus { border-color: var(--cyan); }
+.form-input::placeholder { color: var(--text3); }
+.form-btn { margin-top: 18px; width: 100%; padding: 13px; background: var(--cyan);
+  border: none; border-radius: var(--rsm); color: #000; font-size: 15px;
+  font-weight: 700; cursor: pointer; transition: opacity .2s; }
+.form-btn:hover { opacity: 0.88; }
+.form-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Antworten */
+.antwort-card { background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px; }
+.antwort-card.termin { border-color: rgba(0,230,118,0.35); }
+.antwort-firma { font-size: 15px; font-weight: 700; color: var(--text1); margin-bottom: 4px; }
+.antwort-meta  { font-size: 12px; color: var(--text2); margin-bottom: 2px; }
+.antwort-text  { margin-top: 10px; padding: 10px 12px; background: var(--bg2);
+  border-radius: var(--rsm); font-size: 13px; color: var(--text1);
+  line-height: 1.55; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px;
+  border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+.badge-termin { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.3); }
+
+/* Meldungen */
+.meldung { padding: 12px 16px; border-radius: var(--rsm); font-size: 13px;
+  margin-bottom: 16px; display: none; }
+.meldung.ok  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.2); display: block; }
+.meldung.err { background: rgba(255,71,87,0.1); color: var(--red); border: 1px solid rgba(255,71,87,0.2); display: block; }
+
+/* Empty */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 50px 20px; gap: 12px; color: var(--text3); }
+.empty-icon { font-size: 36px; opacity: 0.4; }
+.empty-text { font-size: 14px; text-align: center; line-height: 1.6; }
+
+/* Footer */
+.footer { display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 28px 14px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.footer-info { font-size: 11px; color: var(--text3); }
+.footer-info span { color: var(--text2); }
+.refresh-btn { background: none; border: 1px solid var(--border); border-radius: var(--rsm);
+  color: var(--text3); font-size: 11px; padding: 5px 12px; cursor: pointer;
+  transition: color .2s, border-color .2s; letter-spacing: 0.06em; }
+.refresh-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* Loading */
+.loading { position: fixed; inset: 0; background: var(--bg); display: flex;
+  align-items: center; justify-content: center; z-index: 100; transition: opacity .3s; }
+.loading.hidden { opacity: 0; pointer-events: none; }
+.loader { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--border2);
+  border-top-color: var(--cyan); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading"><div class="loader"></div></div>
+
+<div class="app">
+
+  <div class="header">
+    <div class="logo-row">
+      <div class="orb"></div>
+      <div class="logo-text"><span>Kunden</span>Agent</div>
+    </div>
+    <div class="header-right">
+      <div class="user-chip">Angemeldet als <b id="userName">—</b></div>
+      <button class="logout-btn" onclick="abmelden()">Abmelden</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-view="uebersicht">Übersicht</div>
+    <div class="tab" data-view="neu" id="tab-neu">Neue Kampagne</div>
+    <div class="tab" data-view="leads">Leads</div>
+    <div class="tab" data-view="antworten" id="tab-antworten">Antworten</div>
+  </div>
+
+  <div class="content">
+
+    <!-- Übersicht -->
+    <div class="view active" id="view-uebersicht">
+      <div class="stats-row" id="statsRow">
+        <div class="stat"><div class="stat-val cyan" id="st-gesamt">—</div><div class="stat-key">Leads gesamt</div></div>
+        <div class="stat"><div class="stat-val green" id="st-telefon">—</div><div class="stat-key">Mit Telefon</div></div>
+        <div class="stat"><div class="stat-val" id="st-angeschrieben">—</div><div class="stat-key">Angeschrieben</div></div>
+        <div class="stat"><div class="stat-val amber" id="st-termine">—</div><div class="stat-key">Termine</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:18px" id="funnelCard">
+        <div class="card-label">Kampagnen-Trichter</div>
+        <div id="funnelContent"></div>
+      </div>
+
+      <div id="laeufeContent"></div>
+    </div>
+
+    <!-- Neue Kampagne -->
+    <div class="view" id="view-neu">
+      <div class="form-wrap">
+        <div class="form-hint">
+          Der Agent sucht automatisch Leads, bereitet Mails vor und <strong>wartet auf deine Freigabe</strong> bevor etwas gesendet wird.
+        </div>
+        <div id="auftragMeldung" class="meldung"></div>
+        <form id="formAuftrag" onsubmit="kampagneStarten(event)">
+          <label class="form-label">Zielgruppe / Branche</label>
+          <input class="form-input" id="auf_zielgruppe" type="text" placeholder="z. B. Handwerker, IT-Dienstleister" required>
+          <label class="form-label">Region / Ort</label>
+          <input class="form-input" id="auf_region" type="text" placeholder="z. B. Köln, NRW" required>
+          <label class="form-label">Lead-Anzahl (Ziel)</label>
+          <input class="form-input" id="auf_anzahl" type="number" value="20" min="1" required>
+          <label class="form-label">Dein Angebot (optional)</label>
+          <input class="form-input" id="auf_angebot" type="text" placeholder="z. B. Webseiten, SEO-Optimierung">
+          <button class="form-btn" type="submit" id="btnAuftrag">Kampagne starten →</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Leads -->
+    <div class="view" id="view-leads">
+      <div class="leads-toolbar">
+        <div class="leads-count"><span id="leadsCount">0</span> Leads</div>
+        <input class="search-input" type="text" placeholder="Suchen…" oninput="filterLeads(this.value)">
+      </div>
+      <div class="leads-grid" id="leadsGrid"></div>
+    </div>
+
+    <!-- Antworten -->
+    <div class="view" id="view-antworten">
+      <div id="antwortenContent"></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <div class="footer-info">Aktualisiert: <span id="lastUpdate">—</span></div>
+    <button class="refresh-btn" onclick="laden()">↻ Aktualisieren</button>
+  </div>
+
+</div>
+
+<script>
+let _alleLeads = [];
+
+// ─── User-Name aus Cookie/API nicht direkt lesbar — über data-Attribut im HTML
+// Der Server injiziert den Namen beim Serving (oder wir holen ihn via /api/me)
+// Fürs Erste: aus sessionStorage wenn login es dort gespeichert hat.
+document.getElementById('userName').textContent =
+  sessionStorage.getItem('ka_name') || 'Nutzer';
+
+// ─── Tabs
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('view-' + t.dataset.view).classList.add('active');
+    if (t.dataset.view === 'antworten') ladenAntworten();
+  });
+});
+
+// ─── Laden
+async function laden() {
+  try {
+    const [r1, r2, r3] = await Promise.all([
+      fetch('/api/agent/funnel'),
+      fetch('/api/agent/laeufe'),
+      fetch('/api/leads'),
+    ]);
+    const funnel = r1.ok ? await r1.json() : null;
+    const laeufe = r2.ok ? await r2.json() : null;
+    const leadsD = r3.ok ? await r3.json() : null;
+
+    renderUebersicht(funnel, laeufe);
+    if (leadsD && leadsD.leads) {
+      _alleLeads = leadsD.leads;
+      renderLeads(_alleLeads);
+      document.getElementById('leadsCount').textContent = _alleLeads.length;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
+  document.getElementById('loading').classList.add('hidden');
+}
+
+function renderUebersicht(funnelData, laeufeData) {
+  const funnel = funnelData?.funnel || { gesamt: 0, stufen: {} };
+  const stufen = funnel.stufen || {};
+  const gesamt = funnel.gesamt || 0;
+
+  document.getElementById('st-gesamt').textContent       = gesamt;
+  document.getElementById('st-telefon').textContent      = stufen.mit_telefon || 0;
+  document.getElementById('st-angeschrieben').textContent= stufen.angeschrieben || 0;
+  document.getElementById('st-termine').textContent      = stufen.termin || 0;
+
+  // Funnel-Balken
+  const funnelStufen = [
+    ['gefunden',      '🔍 Gefunden'],
+    ['bereit',        '✅ Versandbereit'],
+    ['angeschrieben', '📧 Angeschrieben'],
+    ['geantwortet',   '💬 Geantwortet'],
+    ['termin',        '🎯 Termine'],
+  ];
+  const max = Math.max(1, ...Object.values(stufen).map(v => v || 0));
+  let html = '';
+  if (gesamt === 0) {
+    html = '<div style="font-size:13px;color:var(--text3);padding:8px 0">Noch keine Leads. Starte eine neue Kampagne.</div>';
+  } else {
+    for (const [key, label] of funnelStufen) {
+      const n = stufen[key] || 0;
+      const pct = Math.round((n / max) * 100);
+      html += `<div class="funnel-row">
+        <div class="funnel-label">${label}</div>
+        <div class="funnel-bar-bg"><div class="funnel-bar ${key === 'termin' ? 'termin' : ''}" style="width:${pct}%"></div></div>
+        <div class="funnel-num">${n}</div>
+      </div>`;
+    }
+  }
+  document.getElementById('funnelContent').innerHTML = html;
+
+  // Kampagnen-Läufe
+  const laeufe = laeufeData?.laeufe || [];
+  const statusMap = {
+    laeuft:              ['tag-cyan',  '🔄 läuft'],
+    wartet_auf_mensch:   ['tag-amber', '⏸ wartet auf Freigabe'],
+    gesendet:            ['tag-green', '✉️ gesendet'],
+    abgeschlossen:       ['tag-green', '✓ abgeschlossen'],
+    nachgefasst:         ['tag-green', '↻ nachgefasst'],
+    aufgegeben:          ['tag-amber', '⚠ gestoppt'],
+  };
+  let laeufeHtml = '';
+  if (laeufe.length) {
+    laeufeHtml += '<div class="card-label" style="margin:18px 0 10px">Meine Kampagnen</div>';
+    for (const l of laeufe) {
+      const a = l.auftrag || {};
+      const f = l.funnel  || {};
+      const [tc, tt] = statusMap[l.status] || ['tag-cyan', l.status || '—'];
+      laeufeHtml += `<div class="lauf">
+        <div>
+          <div class="lauf-ziel">${esc(a.zielgruppe || '—')} · ${esc(a.region || '—')}</div>
+          <div class="lauf-sub">${f.sendbar || 0}/${a.lead_anzahl || 0} versandbereit · ${l.schritte_anzahl || 0} Schritte</div>
+        </div>
+        <span class="tag ${tc}">${tt}</span>
+      </div>`;
+    }
+  } else {
+    laeufeHtml = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text"><strong>Noch keine Kampagnen</strong><br>Starte deine erste Kampagne im Tab „Neue Kampagne".</div></div>';
+  }
+  document.getElementById('laeufeContent').innerHTML = laeufeHtml;
+}
+
+// ─── Leads
+function renderLeads(leads) {
+  const grid = document.getElementById('leadsGrid');
+  if (!leads || !leads.length) {
+    grid.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text"><strong>Keine Leads</strong><br>Starte eine Kampagne um Leads zu finden.</div></div>';
+    return;
+  }
+  grid.innerHTML = leads.map(l => {
+    const s = l.score || 0;
+    const sc = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+    return `<div class="lead-card">
+      <div class="lead-firma">
+        <div class="score-badge ${sc}">${s || '—'}</div>
+        ${esc(l.firma || '—')}
+      </div>
+      ${l.ort        ? `<div class="lead-detail"><span class="lead-icon">📍</span>${esc(l.ort)}</div>` : ''}
+      ${l.telefon    ? `<div class="lead-detail"><span class="lead-icon">📞</span><span class="lead-phone">${esc(l.telefon)}</span></div>` : ''}
+      ${l.ansprechpartner ? `<div class="lead-detail"><span class="lead-icon">👤</span>${esc(l.ansprechpartner)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function filterLeads(q) {
+  if (!q.trim()) { renderLeads(_alleLeads); return; }
+  const low = q.toLowerCase();
+  renderLeads(_alleLeads.filter(l =>
+    (l.firma || '').toLowerCase().includes(low) ||
+    (l.ort   || '').toLowerCase().includes(low) ||
+    (l.branche || '').toLowerCase().includes(low)
+  ));
+}
+
+// ─── Antworten
+async function ladenAntworten() {
+  const el = document.getElementById('antwortenContent');
+  el.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Lade…</div></div>';
+  try {
+    const r = await fetch('/api/agent/antworten');
+    const d = await r.json();
+    const liste = d.antworten || [];
+    if (!liste.length) {
+      el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text"><strong>Noch keine Antworten</strong></div></div>';
+      return;
+    }
+    el.innerHTML = liste.map(a => {
+      const termin = a.terminwunsch && !a.erledigt;
+      return `<div class="antwort-card${termin ? ' termin' : ''}">
+        <div class="antwort-firma">${esc(a.firma || 'Unbekannt')}${termin ? '<span class="badge badge-termin">🎯 Termin</span>' : ''}</div>
+        ${a.von      ? `<div class="antwort-meta">Von: <b>${esc(a.von)}</b></div>` : ''}
+        ${a.betreff  ? `<div class="antwort-meta">Betreff: ${esc(a.betreff)}</div>` : ''}
+        ${a.auszug   ? `<div class="antwort-text">${esc(a.auszug)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Fehler beim Laden.</div></div>';
+  }
+}
+
+// ─── Kampagne starten
+async function kampagneStarten(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnAuftrag');
+  const meldung = document.getElementById('auftragMeldung');
+  meldung.className = 'meldung';
+  btn.disabled = true;
+  btn.textContent = 'Starte…';
+  try {
+    const r = await fetch('/api/agent/auftrag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        zielgruppe: document.getElementById('auf_zielgruppe').value.trim(),
+        region:     document.getElementById('auf_region').value.trim(),
+        anzahl:     parseInt(document.getElementById('auf_anzahl').value) || 20,
+        angebot:    document.getElementById('auf_angebot').value.trim(),
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      meldung.className = 'meldung ok';
+      meldung.textContent = '✅ ' + d.meldung;
+      document.getElementById('formAuftrag').reset();
+      document.getElementById('auf_anzahl').value = '20';
+      setTimeout(() => {
+        document.querySelector('[data-view="uebersicht"]').click();
+        laden();
+      }, 1800);
+    } else {
+      meldung.className = 'meldung err';
+      meldung.textContent = '⚠️ ' + (d.meldung || 'Fehler.');
+    }
+  } catch (err) {
+    meldung.className = 'meldung err';
+    meldung.textContent = 'Verbindungsfehler.';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Kampagne starten →';
+}
+
+// ─── Logout
+async function abmelden() {
+  await fetch('/api/logout', { method: 'POST' });
+  sessionStorage.removeItem('ka_name');
+  window.location.href = '/login';
+}
+
+// ─── Helpers
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Init
+laden();
+setInterval(laden, 20000);
+</script>
+</body>
+</html>
