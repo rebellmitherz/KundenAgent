@@ -1431,6 +1431,7 @@ function renderMails(mails) {
         <div class="mail-chevron">▼</div>
       </div>
       <div class="mail-body">
+        ${m.anhang ? `<div style="padding:6px 0;color:var(--text2);font-size:12px">📎 Anhang: ${esc(m.anhang)}</div>` : ''}
         <pre class="mail-body-text">${esc(m.inhalt)}</pre>
       </div>
     </div>`).join('');

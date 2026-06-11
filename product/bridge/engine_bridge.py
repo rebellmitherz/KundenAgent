@@ -216,7 +216,12 @@ class EngineBridge:
             auftrag.fehler_setzen(kurz)
             return EngineBrueckenErgebnis(ok=False, meldung=kurz)
 
-        status = self.status_lesen()
+        # Run-Isolation: nur Leads DIESER Kampagne zählen — sonst rutschen
+        # alte Probelauf-Leads aus der kumulativen Pipeline in die Anzeige
+        # ("14/10 versandbereit" bei 10 bestellten Leads).
+        campaign_id = self._aktuelle_campaign_id()
+        status = self.status_lesen(campaign_id=campaign_id)
+        status["campaign_id"] = campaign_id
         return EngineBrueckenErgebnis(
             ok=True,
             leads_gefunden=status.get("pipeline_total", 0),
@@ -225,8 +230,40 @@ class EngineBridge:
             rohdaten=status,
         )
 
-    def status_lesen(self) -> dict:
-        """Liest Statusdaten direkt aus Engine-Output-Dateien (kein mine.py-Aufruf)."""
+    def _aktuelle_campaign_id(self) -> str:
+        """Kampagnen-ID des letzten Engine-Laufs (aus latest/campaign_manifest.json).
+
+        Leer, wenn kein Manifest existiert — dann verhalten sich alle
+        kampagnen-gefilterten Leser wie bisher (global).
+        """
+        manifest = self._output_dir() / "latest" / "campaign_manifest.json"
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            return str(data.get("campaign_id") or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _entry_in_kampagne(e: dict, campaign_id: str) -> bool:
+        """True, wenn der Pipeline-Eintrag zu dieser Kampagne gehört.
+
+        Run-Isolation: alte Probelauf-Leads dürfen nicht in der Zählung
+        oder Freigabe-Vorschau eines aktuellen Laufs auftauchen.
+        """
+        if not campaign_id:
+            return True
+        return campaign_id in (
+            e.get("campaign_id"),
+            e.get("first_seen_campaign_id"),
+            e.get("last_campaign_id"),
+        )
+
+    def status_lesen(self, campaign_id: str | None = None) -> dict:
+        """Liest Statusdaten direkt aus Engine-Output-Dateien (kein mine.py-Aufruf).
+
+        campaign_id gesetzt → zählt nur Einträge dieser Kampagne
+        (Run-Isolation). None/leer → globale Zählung wie bisher.
+        """
         pipeline = self._pipeline_pfad()
         sent = self._sent_pfad()
         result = {
@@ -239,7 +276,10 @@ class EngineBridge:
         try:
             if pipeline.exists():
                 data = json.loads(pipeline.read_text(encoding="utf-8"))
-                entries = data.get("entries", [])
+                entries = [
+                    e for e in data.get("entries", [])
+                    if self._entry_in_kampagne(e, campaign_id or "")
+                ]
                 result["pipeline_total"] = len(entries)
                 result["approved"] = sum(
                     1 for e in entries if e.get("approved_for_send")
@@ -292,21 +332,33 @@ class EngineBridge:
 
     # ----------------------------------------------------------------- V2
 
-    def vorschau_lesen(self, limit: int = 30) -> list[dict]:
+    def vorschau_lesen(self, limit: int = 30, campaign_id: str | None = None) -> list[dict]:
         """V2: Liest Mail-Vorschau (noch nicht gesendete, sendbare Eintraege).
 
         Gibt subject + body zurueck — keine Secrets, keine Admin-Felder.
         Kein mine.py-Aufruf, nur Datei-Lesen.
+
+        Run-Isolation: Default (None) = NUR die aktuelle Kampagne aus dem
+        letzten Lauf — alte Probelauf-Leads duerfen nicht zur Freigabe
+        vorbereitet werden. campaign_id="" erzwingt explizit alle.
         """
+        if campaign_id is None:
+            campaign_id = self._aktuelle_campaign_id()
         pipeline = self._pipeline_pfad()
         if not pipeline.exists():
             return []
+        # Anhang der Erstmail (Engine: _first_touch_attachments) — fuer die
+        # Vorschau nur den Dateinamen anzeigen, wenn die Datei wirklich existiert.
+        anhang_pfad = self.engine_dir.parent / "assets" / "Rebellsystem.pdf"
+        anhang = anhang_pfad.name if anhang_pfad.exists() else ""
         try:
             data = json.loads(pipeline.read_text(encoding="utf-8"))
             entries = data.get("entries", [])
             out = []
             for e in entries:
-                # Nur sendbare, noch nicht gesendete Eintraege
+                # Nur sendbare, noch nicht gesendete Eintraege dieser Kampagne
+                if not self._entry_in_kampagne(e, campaign_id):
+                    continue
                 if e.get("do_not_resend"):
                     continue
                 if e.get("sent_message_id"):
@@ -322,6 +374,7 @@ class EngineBridge:
                     "ansprechpartner": e.get("contact_name", ""),
                     "betreff":         e.get("first_email_subject", ""),
                     "inhalt":          body,
+                    "anhang":          anhang,
                     "approved":        bool(e.get("approved_for_send")),
                     "entry_key":       e.get("entry_key", ""),
                 })
