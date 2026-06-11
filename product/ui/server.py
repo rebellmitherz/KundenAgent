@@ -89,6 +89,7 @@ _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/agent/nachfassen", "/api/agent/auftrag",
                      "/api/agent/termin-abschliessen", "/api/agent/antworten-abrufen",
                      "/api/closer/status", "/api/closer/log",
+                     "/api/closer/events", "/api/closer/skript",
                      "/api/closer/starten", "/api/closer/stoppen"}
 
 
@@ -228,6 +229,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._serve_closer_log()
+        elif self.path == "/api/closer/events":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_closer_events()
+        elif self.path == "/api/closer/skript":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_closer_skript()
         elif self.path == "/api/admin/mandanten":
             if not self._ist_admin():
                 self._403(); return
@@ -799,6 +808,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"zeilen": []})
             return
         self._json({"zeilen": _closer.log_lesen(limit=50)})
+
+    def _serve_closer_events(self):
+        if not _closer:
+            self._json({"events": []})
+            return
+        self._json({"events": _closer.events_lesen(limit=80)})
+
+    def _serve_closer_skript(self):
+        if not _closer:
+            self._json({"verfuegbar": False})
+            return
+        self._json(_closer.skript())
 
     def _handle_closer_starten(self):
         if not _closer:

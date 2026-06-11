@@ -1009,6 +1009,52 @@ html, body {
                   border: 1px solid rgba(0,230,118,0.2); }
 .closer-msg.err { background: rgba(255,71,87,0.1); color: var(--red);
                   border: 1px solid rgba(255,71,87,0.2); }
+
+/* Closer: Skript-Panel (oben, fest) + Live-Feed (unten) */
+.closer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+               align-items: start; }
+@media (max-width: 900px) { .closer-grid { grid-template-columns: 1fr; } }
+
+.script-panel { background: var(--card); border: 1px solid var(--cyan);
+                border-radius: 10px; padding: 16px 18px; }
+.script-panel-title { font-size: 11px; letter-spacing: .12em; color: var(--cyan);
+                      font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
+.script-panel-sub { font-size: 11px; color: var(--text3); margin-bottom: 14px;
+                    line-height: 1.4; }
+.script-block { margin-bottom: 12px; }
+.script-block-label { font-size: 10px; letter-spacing: .1em; color: var(--green);
+                      font-weight: 700; text-transform: uppercase; margin-bottom: 3px; }
+.script-block-text { font-size: 12.5px; color: var(--text1); line-height: 1.5; }
+.script-einwand-titel { font-size: 10px; letter-spacing: .1em; color: var(--red);
+                        font-weight: 700; text-transform: uppercase; margin: 14px 0 8px; }
+.einwand-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.einwand-chip { font-size: 11px; color: var(--red); border: 1px solid rgba(255,71,87,0.35);
+                border-radius: 4px; padding: 3px 8px; background: rgba(255,71,87,0.06); }
+
+.live-feed { background: #0a0d12; border: 1px solid var(--border); border-radius: 10px;
+             padding: 14px 16px; height: 460px; overflow-y: auto; display: flex;
+             flex-direction: column; gap: 8px; }
+.feed-empty { color: var(--text3); font-style: italic; font-size: 12px; }
+.feed-line { font-size: 13px; line-height: 1.4; }
+.feed-line .who { font-weight: 700; }
+.feed-line.seller   .who { color: var(--cyan); }
+.feed-line.customer .who { color: var(--amber); }
+.feed-line.seller   { color: var(--text1); }
+.feed-line.customer { color: var(--text1); }
+.feed-log { font-size: 11px; color: var(--text3); font-family: monospace; }
+
+.coach-card { border-radius: 8px; padding: 10px 12px; border-left: 3px solid var(--text3);
+              background: var(--card2); }
+.coach-card.einwand    { border-left-color: var(--red); }
+.coach-card.kaufsignal { border-left-color: var(--green); }
+.coach-card-head { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.coach-card.einwand    .coach-card-head { color: var(--red); }
+.coach-card.kaufsignal .coach-card-head { color: var(--green); }
+.coach-card.neutral    .coach-card-head { color: var(--text2); }
+.coach-row { font-size: 13px; color: var(--text1); line-height: 1.45; margin-top: 3px; }
+.coach-row .tag { font-weight: 700; color: var(--text2); margin-right: 4px; }
+.coach-row.closing { color: var(--amber); }
+.coach-row.closing .tag { color: var(--amber); }
 </style>
 </head>
 <body>
@@ -1310,7 +1356,10 @@ function renderLeadsFromStatus(d) {
 function renderLeads(leads) {
   const grid = document.getElementById('leadsGrid');
   if (!leads || leads.length === 0) {
-    grid.innerHTML = emptyState('📋', 'Keine Leads', 'Starte eine Suche über Telegram.');
+    grid.innerHTML = emptyState('📋', 'Noch keine Leads',
+      'Meist war die Suche nur zu eng gefasst — kein Fehler. ' +
+      'Was jetzt hilft: Region erweitern (Nachbarstadt/Bundesland), ' +
+      'Branche breiter formulieren oder mit kleiner Menge (5–10) neu starten.');
     return;
   }
 
@@ -1318,6 +1367,10 @@ function renderLeads(leads) {
     const s = l.score || 0;
     const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
     const scoreLabel = s > 0 ? s : '—';
+    const gruende = (l.gruende || []).map(g => `<div class="lead-detail">
+        <span class="lead-icon">✓</span>
+        <span style="color:var(--text2);font-size:12px">${esc(g)}</span>
+      </div>`).join('');
 
     return `
     <div class="lead-card">
@@ -1345,6 +1398,13 @@ function renderLeads(leads) {
         <span class="lead-icon">🌐</span>
         <span style="color:var(--text3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">
           ${esc(l.website.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span>
+      </div>` : ''}
+
+      ${gruende}
+
+      ${l.naechster_schritt ? `<div class="lead-detail" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+        <span class="lead-icon">→</span>
+        <span style="color:var(--cyan);font-size:12px;font-weight:600">${esc(l.naechster_schritt)}</span>
       </div>` : ''}
 
       ${l.branche ? `<div class="lead-branche">${esc(l.branche)}</div>` : ''}
@@ -2028,11 +2088,12 @@ async function setupSpeichernSmtp(e) {
 
 // ─── Closer Tab ───────────────────────────────────────────────────────────
 let _closerStatus = null;
+let _closerSkript = null;
 let _closerLogInterval = null;
 
 document.getElementById('tab-closer').addEventListener('click', () => {
   closerLaden();
-  _closerLogInterval = setInterval(closerLogAktualisieren, 3000);
+  _closerLogInterval = setInterval(closerEventsAktualisieren, 1500);
 });
 
 document.querySelectorAll('.tab').forEach(t => {
@@ -2051,24 +2112,56 @@ async function closerLaden() {
   } catch(_) {
     _closerStatus = { laeuft: false, closer_verfuegbar: false, meldung: 'Server nicht erreichbar.' };
   }
+  try {
+    const rs = await fetch('/api/closer/skript', { headers: _adminHeaders({'Content-Type': undefined}) });
+    _closerSkript = await rs.json();
+  } catch(_) { _closerSkript = { verfuegbar: false }; }
   renderCloser(_closerStatus);
-  await closerLogAktualisieren();
+  await closerEventsAktualisieren();
 }
 
-async function closerLogAktualisieren() {
+async function closerEventsAktualisieren() {
   try {
-    const r = await fetch('/api/closer/log', { headers: _adminHeaders({'Content-Type': undefined}) });
+    const r = await fetch('/api/closer/events', { headers: _adminHeaders({'Content-Type': undefined}) });
     const d = await r.json();
-    const el = document.getElementById('closerLogBox');
+    const el = document.getElementById('closerFeed');
     if (!el) return;
-    const zeilen = d.zeilen || [];
-    if (zeilen.length === 0) {
-      el.innerHTML = '<span class="closer-log-empty">Noch keine Ausgabe.</span>';
-    } else {
-      el.textContent = zeilen.join('\n');
-      el.scrollTop = el.scrollHeight;
+    const events = d.events || [];
+    if (events.length === 0) {
+      el.innerHTML = '<span class="feed-empty">Noch kein Gespräch.</span>';
+      return;
     }
+    el.innerHTML = events.map(renderCloserEvent).filter(Boolean).join('');
+    el.scrollTop = el.scrollHeight;
   } catch(_) {}
+}
+
+function renderCloserEvent(e) {
+  if (!e || !e.typ) return '';
+  if (e.typ === 'transkript') {
+    const seller = e.rolle === 'VERKAEUFER';
+    const who = seller ? '🧑 Verkäufer' : '👤 Kunde';
+    return `<div class="feed-line ${seller ? 'seller' : 'customer'}">`
+         + `<span class="who">${who}:</span> ${esc(e.text || '')}</div>`;
+  }
+  if (e.typ === 'coaching') {
+    const st = (e.signal_type || 'neutral').toLowerCase();
+    const icon = st === 'einwand' ? '🔴' : st === 'kaufsignal' ? '🟢' : '⚪';
+    const head = `${icon} ${esc((e.signal_label || st).toUpperCase())}`;
+    const closing = e.closing_hint && !['null','none',''].includes(String(e.closing_hint).toLowerCase());
+    return `<div class="coach-card ${esc(st)}">`
+         + `<div class="coach-card-head">${head}</div>`
+         + (e.next_answer   ? `<div class="coach-row"><span class="tag">💬 Sag:</span>${esc(e.next_answer)}</div>` : '')
+         + (e.next_question ? `<div class="coach-row"><span class="tag">❓ Frag:</span>${esc(e.next_question)}</div>` : '')
+         + (closing         ? `<div class="coach-row closing"><span class="tag">🎯 Closing:</span>${esc(e.closing_hint)}</div>` : '')
+         + `</div>`;
+  }
+  if (e.typ === 'log') {
+    const t = (e.text || '').trim();
+    if (!t) return '';
+    return `<div class="feed-log">${esc(t)}</div>`;
+  }
+  return '';
 }
 
 function renderCloser(s) {
@@ -2111,11 +2204,46 @@ function renderCloser(s) {
         </button>
       </div>
 
-      <div class="closer-h2">Live-Log</div>
-      <div class="closer-log" id="closerLogBox">
-        <span class="closer-log-empty">Noch keine Ausgabe.</span>
+      <div class="closer-grid">
+        <div>
+          <div class="closer-h2">Gesprächsskript</div>
+          <div id="closerSkript"></div>
+        </div>
+        <div>
+          <div class="closer-h2">Live-Coaching</div>
+          <div class="live-feed" id="closerFeed">
+            <span class="feed-empty">Noch kein Gespräch.</span>
+          </div>
+        </div>
       </div>
 
+    </div>
+  `;
+  renderCloserSkript(_closerSkript);
+}
+
+function renderCloserSkript(s) {
+  const el = document.getElementById('closerSkript');
+  if (!el) return;
+  if (!s || !s.verfuegbar) {
+    el.innerHTML = '<div class="script-panel"><div class="script-panel-sub">Kein Skript geladen (playbook.json fehlt).</div></div>';
+    return;
+  }
+  const block = (label, text) => text
+    ? `<div class="script-block"><div class="script-block-label">${esc(label)}</div><div class="script-block-text">${esc(text)}</div></div>`
+    : '';
+  const chips = (s.einwand_labels || [])
+    .map(l => `<span class="einwand-chip">${esc(l)}</span>`).join('');
+  el.innerHTML = `
+    <div class="script-panel">
+      <div class="script-panel-title">${esc(s.produkt_name || 'Gesprächsskript')}</div>
+      <div class="script-panel-sub">${esc(s.zielgruppe || '')}</div>
+      ${block('Eröffnung', s.eroeffnung)}
+      ${block('Sympathie', s.sympathie)}
+      ${block('Nutzensatz', s.nutzensatz)}
+      ${block('Abschlussfrage', s.abschlussfrage)}
+      ${block('Termin', s.termin_frage)}
+      ${chips ? `<div class="script-einwand-titel">Einwand-Check</div><div class="einwand-chips">${chips}</div>` : ''}
     </div>
   `;
 }

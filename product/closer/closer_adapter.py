@@ -15,7 +15,9 @@ Verwendung:
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +27,8 @@ from typing import Deque
 
 
 _MAX_LOG_ZEILEN = 200
+_MAX_EVENTS = 200
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _GEHEIME_ENV_VARS = frozenset({
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "BOT_TOKEN",
     "SMTP_PASS", "IMAP_PASS",
@@ -46,6 +50,7 @@ class CloserAdapter:
         self.closer_dir = Path(closer_dir)
         self._prozess: subprocess.Popen | None = None
         self._log: Deque[str] = deque(maxlen=_MAX_LOG_ZEILEN)
+        self._events: Deque[dict] = deque(maxlen=_MAX_EVENTS)
         self._lock = threading.Lock()
         self._log_thread: threading.Thread | None = None
 
@@ -80,6 +85,7 @@ class CloserAdapter:
                 return {"ok": False, "meldung": f"Start fehlgeschlagen: {e}"}
 
             self._log.clear()
+            self._events.clear()
             self._log_thread = threading.Thread(
                 target=self._log_lesen_loop,
                 daemon=True,
@@ -128,6 +134,39 @@ class CloserAdapter:
             zeilen = list(self._log)
         return zeilen[-limit:] if limit < len(zeilen) else zeilen
 
+    def events_lesen(self, limit: int = 80) -> list[dict]:
+        """Letzte N strukturierte Events (transkript / coaching / log)."""
+        with self._lock:
+            evs = list(self._events)
+        return evs[-limit:] if limit < len(evs) else evs
+
+    def skript(self) -> dict:
+        """Liest das Gesprächsskript aus playbook.json (für das Dashboard-Panel).
+
+        Gibt nur anzeige-relevante, nicht-geheime Felder zurück.
+        """
+        pfad = self.closer_dir / "playbook.json"
+        try:
+            with open(pfad, encoding="utf-8") as f:
+                pb = json.load(f)
+        except (OSError, ValueError):
+            return {"verfuegbar": False}
+
+        produkt = pb.get("produkt", {})
+        skript = pb.get("gespraechsskript", {})
+        einwaende = [e.get("label", "") for e in pb.get("einwaende", []) if e.get("label")]
+        return {
+            "verfuegbar": True,
+            "produkt_name": produkt.get("name", ""),
+            "zielgruppe": produkt.get("zielgruppe", ""),
+            "eroeffnung": skript.get("eroeffnung", ""),
+            "sympathie": (skript.get("sympathie_saetze") or [None])[0] or "",
+            "nutzensatz": skript.get("nutzensatz_universal", ""),
+            "abschlussfrage": skript.get("abschlussfrage", ""),
+            "termin_frage": skript.get("termin_frage", ""),
+            "einwand_labels": einwaende,
+        }
+
     # ── Interne Helfer ───────────────────────────────────────────────────────
 
     def _laeuft_unsicher(self) -> bool:
@@ -140,19 +179,39 @@ class CloserAdapter:
         """Baut Prozess-Umgebung. Erbt alle Variablen — keine werden geloggt."""
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
+        # Dashboard-Modus: ClouseAgent gibt strukturierte JSONL-Events aus
+        env["CLOSER_OUTPUT"] = "json"
         return env
 
     def _log_lesen_loop(self) -> None:
-        """Liest stdout des Subprozesses in Hintergrund-Thread."""
+        """Liest stdout des Subprozesses, befüllt Roh-Log UND Event-Puffer."""
         try:
             for zeile in self._prozess.stdout:
                 bereinigt = zeile.rstrip("\n")
-                # Keine Secrets im Log-Puffer
-                if not _enthaelt_secret(bereinigt):
-                    with self._lock:
-                        self._log.append(bereinigt)
+                if _enthaelt_secret(bereinigt):
+                    continue
+                with self._lock:
+                    self._log.append(bereinigt)
+                    self._events.append(self._zu_event(bereinigt))
         except Exception:
             pass
+
+    @staticmethod
+    def _zu_event(zeile: str) -> dict:
+        """Parst eine stdout-Zeile zu einem strukturierten Event.
+
+        JSON-Zeilen mit "typ" werden direkt übernommen. Alles andere
+        (Boot-/Status-Ausgaben) wird als Log-Event verpackt (ANSI entfernt).
+        """
+        s = zeile.strip()
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict) and "typ" in obj:
+                    return obj
+            except (ValueError, TypeError):
+                pass
+        return {"typ": "log", "text": _ANSI.sub("", zeile)}
 
 
 def _enthaelt_secret(zeile: str) -> bool:

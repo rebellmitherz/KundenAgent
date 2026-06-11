@@ -33,6 +33,64 @@ class EngineBrueckenErgebnis:
     rohdaten: dict = field(default_factory=dict)
 
 
+# Sammel-Postfächer — eine persönliche Adresse ist mehr wert als info@.
+_GENERISCHE_MAIL_PREFIXES = (
+    "info", "kontakt", "mail", "office", "hello", "hallo", "post",
+    "contact", "service", "support", "willkommen", "anfrage",
+)
+
+
+def _website_bereinigt(url: str) -> str:
+    """Tracking-Query (utm_*) aus der Website-URL fürs UI entfernen."""
+    u = (url or "").strip()
+    if "?" in u and "utm_" in u.split("?", 1)[1].lower():
+        return u.split("?", 1)[0]
+    return u
+
+
+def _lead_begruendung(e: dict) -> tuple[list[str], str]:
+    """Bildet kurze, deterministische Gründe + nächsten Schritt aus
+    VORHANDENEN Pipeline-Feldern. Keine neue Bewertung, keine KI —
+    nur lesbar machen, was Scoring/Suche bereits entschieden haben.
+    """
+    gruende: list[str] = []
+
+    score = int(e.get("score") or 0)
+    if score >= 70:
+        gruende.append(f"Sehr gute Passung (Score {score})")
+    elif score >= 40:
+        gruende.append(f"Solide Passung (Score {score})")
+    elif score > 0:
+        gruende.append(f"Schwache Passung (Score {score})")
+
+    telefon = (e.get("phone") or e.get("contact_phone") or "").strip()
+    if telefon:
+        gruende.append("Telefon vorhanden — direkt anrufbar")
+
+    ansprechpartner = (e.get("contact_name") or "").strip()
+    email = (e.get("email") or "").strip().lower()
+    if ansprechpartner:
+        gruende.append(f"Ansprechpartner: {ansprechpartner}")
+    elif email:
+        prefix = email.split("@", 1)[0]
+        if prefix in _GENERISCHE_MAIL_PREFIXES:
+            gruende.append("Nur Sammel-Adresse (z. B. info@) — Anruf wirkt besser")
+        else:
+            gruende.append("Persönliche E-Mail-Adresse gefunden")
+
+    sendbar = (e.get("ready_to_send") or "").strip().lower() == "yes"
+    if sendbar:
+        schritt = "Mail-Entwurf liegt bereit — im Freigabe-Tab prüfen"
+    elif telefon:
+        schritt = "Anrufen — Nummer liegt vor"
+    elif email:
+        schritt = "Kontakt per E-Mail prüfen"
+    else:
+        schritt = "Website manuell prüfen"
+
+    return gruende[:3], schritt
+
+
 class EngineBridge:
     """Übersetzte bestätigte Aufträge in mine.py-Aufrufe.
 
@@ -214,14 +272,17 @@ class EngineBridge:
             for e in entries:
                 if e.get("do_not_resend"):
                     continue
+                gruende, schritt = _lead_begruendung(e)
                 out.append({
                     "firma": e.get("company_name", ""),
                     "email": e.get("email", ""),
                     "telefon": e.get("phone") or e.get("contact_phone") or "",
                     "ansprechpartner": e.get("contact_name", ""),
-                    "website": e.get("website", ""),
+                    "website": _website_bereinigt(e.get("website", "")),
                     "score": e.get("score", 0),
                     "ort": e.get("city", ""),
+                    "gruende": gruende,
+                    "naechster_schritt": schritt,
                 })
                 if len(out) >= limit:
                     break

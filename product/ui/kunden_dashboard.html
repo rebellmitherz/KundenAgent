@@ -402,12 +402,21 @@ function renderUebersicht(funnelData, laeufeData) {
 function renderLeads(leads) {
   const grid = document.getElementById('leadsGrid');
   if (!leads || !leads.length) {
-    grid.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text"><strong>Keine Leads</strong><br>Starte eine Kampagne um Leads zu finden.</div></div>';
+    grid.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">
+      <strong>Noch keine Leads in dieser Kampagne</strong><br>
+      Das ist meist kein Fehler — die Suche war nur zu eng gefasst.<br><br>
+      <span style="color:var(--text2)">Was jetzt hilft:</span><br>
+      • Region erweitern (z.&nbsp;B. Nachbarstadt oder Bundesland)<br>
+      • Branche breiter formulieren (z.&nbsp;B. „Agentur" statt Nische)<br>
+      • Mit kleiner Leadmenge (5–10) neu starten<br>
+    </div></div>`;
     return;
   }
   grid.innerHTML = leads.map(l => {
     const s = l.score || 0;
     const sc = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+    const gruende = (l.gruende || []).map(g =>
+      `<div class="lead-detail"><span class="lead-icon">✓</span><span style="color:var(--text2);font-size:12px">${esc(g)}</span></div>`).join('');
     return `<div class="lead-card">
       <div class="lead-firma">
         <div class="score-badge ${sc}">${s || '—'}</div>
@@ -416,6 +425,8 @@ function renderLeads(leads) {
       ${l.ort        ? `<div class="lead-detail"><span class="lead-icon">📍</span>${esc(l.ort)}</div>` : ''}
       ${l.telefon    ? `<div class="lead-detail"><span class="lead-icon">📞</span><span class="lead-phone">${esc(l.telefon)}</span></div>` : ''}
       ${l.ansprechpartner ? `<div class="lead-detail"><span class="lead-icon">👤</span>${esc(l.ansprechpartner)}</div>` : ''}
+      ${gruende}
+      ${l.naechster_schritt ? `<div class="lead-detail" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span class="lead-icon">→</span><span style="color:var(--cyan);font-size:12px;font-weight:600">${esc(l.naechster_schritt)}</span></div>` : ''}
     </div>`;
   }).join('');
 }
