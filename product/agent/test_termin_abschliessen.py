@@ -154,12 +154,12 @@ def t_runner_keine_offenen_termine():
 
 def t_termin_detail_zeigt_kontext():
     a = [_antwort("artundweise.de", termin=True, grund="positive_reply",
-                  von="we@artundweise.de", postfach="partners@rebellsystem.de",
+                  von="we@artundweise.de", postfach="emilio.allegro@rebellsystem.de",
                   gesendet="2026-04-27T23:49:09")]
     t = termin_detail_bericht(a)
     assert "we@artundweise.de" in t
     assert "27.04.2026" in t           # Datum hübsch formatiert
-    assert "partners@rebellsystem.de" in t
+    assert "emilio.allegro@rebellsystem.de" in t
     assert "abschließen" in t.lower()  # Hinweis auf Abschluss-Befehl
 
 
