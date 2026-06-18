@@ -1081,9 +1081,17 @@ html, body {
       <div class="orb" id="orb"></div>
       <div class="logo-text"><span>Rebellsystem</span> Sales Operator</div>
     </div>
-    <div class="status-dot">
-      <div class="dot" id="statusDot"></div>
-      <span id="statusLabel">Verbinde…</span>
+    <div style="display:flex;align-items:center;gap:14px">
+      <div id="angebotPicker" style="display:none;align-items:center;gap:7px">
+        <span style="font-size:12px;color:var(--text2)">Angebot:</span>
+        <select id="angebotDropdown" onchange="angebotWechseln(this.value)"
+          style="background:var(--bg2);color:var(--text);border:1px solid var(--line);
+                 border-radius:8px;padding:5px 9px;font-size:13px;cursor:pointer"></select>
+      </div>
+      <div class="status-dot">
+        <div class="dot" id="statusDot"></div>
+        <span id="statusLabel">Verbinde…</span>
+      </div>
     </div>
   </div>
 
@@ -1093,10 +1101,12 @@ html, body {
     <div class="tab" data-view="kampagne" id="tab-kampagne">Kampagne</div>
     <div class="tab" data-view="antworten" id="tab-antworten">Antworten</div>
     <div class="tab" data-view="leads">Leads</div>
+    <div class="tab" data-view="signalleads" id="tab-signalleads">⚡ Signal-Leads</div>
     <div class="tab" data-view="vorschau">Mail-Vorschau</div>
     <div class="tab" data-view="freigabe">Freigabe</div>
     <div class="tab" data-view="auftrag" id="tab-auftrag">Neuer Auftrag</div>
     <div class="tab" data-view="closer" id="tab-closer">Closer</div>
+    <div class="tab" data-view="angebote" id="tab-angebote">Angebote</div>
     <div class="tab" data-view="mandanten" id="tab-mandanten">Mandanten</div>
     <div class="tab" data-view="setup" id="tab-setup">Einrichtung</div>
   </div>
@@ -1149,6 +1159,12 @@ html, body {
         <div class="leads-count">
           <span id="leadsCount">0</span> Leads gefunden
         </div>
+        <select class="search-input" id="leadSort" style="max-width:200px"
+                onchange="setLeadSort(this.value)">
+          <option value="score">Sortieren: Score (hoch→niedrig)</option>
+          <option value="telefon">Sortieren: Mit Telefon zuerst</option>
+          <option value="az">Sortieren: Firma A–Z</option>
+        </select>
         <input class="search-input" type="text" id="searchInput"
                placeholder="Suchen…" oninput="filterLeads(this.value)">
       </div>
@@ -1157,9 +1173,26 @@ html, body {
       </div>
     </div><!-- /view-leads -->
 
+    <!-- Signal-Leads View — fester Platz für High-Intent-Treffer -->
+    <div class="view" id="view-signalleads">
+      <div class="leads-toolbar">
+        <div class="leads-count">
+          ⚡ <span id="signalLeadsCount">0</span> Signal-Leads — Firmen mit echtem Kaufsignal
+        </div>
+        <button class="search-input" id="btnSignalReload" style="max-width:160px;cursor:pointer"
+                onclick="loadSignalLeads()">↻ Aktualisieren</button>
+      </div>
+      <div id="signalLeadsTab"></div>
+    </div><!-- /view-signalleads -->
+
     <!-- Closer View -->
     <div class="view" id="view-closer">
       <div id="closerContent"></div>
+    </div>
+
+    <!-- Angebote View -->
+    <div class="view" id="view-angebote">
+      <div id="angeboteContent"></div>
     </div>
 
     <!-- Mandanten View -->
@@ -1187,6 +1220,7 @@ html, body {
 let _daten = null;
 let _alleLeads = [];
 let _alleMails = [];
+let _leadSort = 'score';   // score | telefon | az
 let _autoRefresh = null;
 let _freigabeLimitAktuell = 20;
 let _freigabeSendbar = 0;
@@ -1236,6 +1270,9 @@ async function laden() {
       document.getElementById('mailCount').textContent = _alleMails.length;
     }
   } catch (_) {}
+
+  // Signal-Leads vorab laden, damit der letzte Stand sofort im Tab steht.
+  try { loadSignalLeads(); } catch (_) {}
 
   document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
   document.getElementById('loading').classList.add('hidden');
@@ -1353,6 +1390,23 @@ function renderLeadsFromStatus(d) {
   }
 }
 
+function sortiereLeads(leads) {
+  const arr = [...leads];
+  if (_leadSort === 'telefon') {
+    arr.sort((a, b) => ((b.telefon ? 1 : 0) - (a.telefon ? 1 : 0)) || ((b.score || 0) - (a.score || 0)));
+  } else if (_leadSort === 'az') {
+    arr.sort((a, b) => (a.firma || '').localeCompare(b.firma || '', 'de'));
+  } else {
+    arr.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+  return arr;
+}
+
+function setLeadSort(mode) {
+  _leadSort = mode;
+  filterLeads(document.getElementById('searchInput').value || '');
+}
+
 function renderLeads(leads) {
   const grid = document.getElementById('leadsGrid');
   if (!leads || leads.length === 0) {
@@ -1363,7 +1417,7 @@ function renderLeads(leads) {
     return;
   }
 
-  grid.innerHTML = leads.map(l => {
+  grid.innerHTML = sortiereLeads(leads).map(l => {
     const s = l.score || 0;
     const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
     const scoreLabel = s > 0 ? s : '—';
@@ -1619,6 +1673,7 @@ function emptyState(icon, title, sub) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 laden();
+ladenAngebote();   // füllt das globale Angebot-Dropdown im Header (Admin)
 _autoRefresh = setInterval(laden, 15000);  // alle 15 Sek aktualisieren
 
 // ─── Admin-Token ──────────────────────────────────────────────────────────
@@ -1801,26 +1856,65 @@ function renderKampagne(funnelData, laeufeData) {
 // --- Neuer Auftrag ---
 function renderAuftragForm() {
   const el = document.getElementById('auftragContent');
+  const ang = (typeof _angebotAktivObj === 'function') ? _angebotAktivObj() : null;
+  const vBranche = ang ? esc(ang.branche || '') : '';
+  const vStadt = ang ? esc(ang.stadt || '') : '';
+  const vAnzahl = ang && ang.lead_anzahl ? ang.lead_anzahl : 20;
+  const angHinweis = ang ? `<div class="setup-hint" style="margin-top:8px">Aktives Angebot:
+    <strong>${esc(ang.name)}</strong> — Mailtext, Betreff und PDF dieses Angebots werden für
+    diese Kampagne verwendet. Umschalten oben rechts.</div>` : '';
   el.innerHTML = `
     <div class="setup-section">
       <div class="setup-hint">
         🎯 Gib dein Ziel ein — der Agent sucht, füllt bei Lücken selbst nach und
         <strong>stoppt am harten Tor</strong> (Senden bestätigst nur du).
       </div>
+      ${angHinweis}
       <div class="setup-h2" style="margin-top:0">Neue Kampagne starten</div>
       <div id="auftragMsg"></div>
+      <div class="setup-form-row">
+        <label class="setup-label">Suchmodus</label>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="setup-btn modus-btn" id="modusBranche"
+            onclick="setSuchModus('branche')">Branchensuche</button>
+          <button type="button" class="setup-btn modus-btn" id="modusSignal"
+            onclick="setSuchModus('signal')">⚡ Signal-Suche</button>
+        </div>
+        <div class="setup-hint" id="modusHint" style="margin-top:8px"></div>
+      </div>
       <form id="formAuftrag" onsubmit="auftragStarten(event)">
         <div class="setup-form-row">
           <label class="setup-label">Zielgruppe / Branche</label>
-          <input type="text" class="setup-input" id="auf_zielgruppe" placeholder="z. B. Handwerker, IT-Dienstleister" required>
+          <input type="text" class="setup-input" id="auf_zielgruppe" value="${vBranche}" placeholder="z. B. Handwerker, IT-Dienstleister" required>
         </div>
         <div class="setup-form-row">
-          <label class="setup-label">Region / Ort</label>
-          <input type="text" class="setup-input" id="auf_region" placeholder="z. B. Köln, NRW" required>
+          <label class="setup-label" id="lblRegion">Region / Ort</label>
+          <input type="text" class="setup-input" id="auf_region" value="${vStadt}" placeholder="z. B. Köln, NRW" required>
+        </div>
+        <div class="setup-form-row" id="landRow" style="display:none">
+          <label class="setup-label">Land / Region</label>
+          <select class="setup-input" id="auf_land">
+            <option value="de">Deutschland</option>
+            <option value="at">Österreich</option>
+            <option value="ch">Schweiz</option>
+            <option value="dach">DACH (alle drei)</option>
+          </select>
+          <div class="setup-hint" style="margin-top:6px">Stadt leer lassen = ganzes Land / DACH durchsuchen.</div>
+        </div>
+        <div class="setup-form-row" id="signalTypRow" style="display:none">
+          <label class="setup-label">Welches Kaufsignal?</label>
+          <select class="setup-input" id="auf_signal_typ">
+            <option value="sales_hiring">Stellt aktiv Vertrieb ein (heißeste Spur)</option>
+            <option value="growth_expansion">Wächst / baut Team aus</option>
+            <option value="appointment_setter">Sucht Terminierer / SDR (Outbound)</option>
+            <option value="marketing_hiring">Investiert in Marketing / Leadgen</option>
+            <option value="leadership_hiring">Holt Vertriebs-/Marketingleitung</option>
+            <option value="new_location">Eröffnet Standort / expandiert</option>
+          </select>
         </div>
         <div class="setup-form-row">
           <label class="setup-label">Lead-Anzahl (Ziel)</label>
-          <input type="number" class="setup-input" id="auf_anzahl" value="20" min="1" required>
+          <input type="number" class="setup-input" id="auf_anzahl" value="${vAnzahl}" min="1" required>
         </div>
         <div class="setup-form-row">
           <label class="setup-label">Dein Angebot (optional)</label>
@@ -1828,11 +1922,55 @@ function renderAuftragForm() {
         </div>
         <button type="submit" class="setup-btn" id="btnAuftrag">→ Kampagne starten</button>
       </form>
+      <div id="signalErgebnis" style="margin-top:20px;color:var(--text3);font-size:12px">
+        ⚡ Signal-Treffer landen im eigenen Tab „⚡ Signal-Leads" (oben) — dauerhaft, auch nach Tab-Wechsel.
+      </div>
     </div>`;
+  setSuchModus(_suchModus);
+}
+
+let _suchModus = 'branche';
+let _signalPollTimer = null;
+
+function setSuchModus(m) {
+  _suchModus = (m === 'signal') ? 'signal' : 'branche';
+  const bBranche = document.getElementById('modusBranche');
+  const bSignal = document.getElementById('modusSignal');
+  const sigRow = document.getElementById('signalTypRow');
+  const landRow = document.getElementById('landRow');
+  const lblRegion = document.getElementById('lblRegion');
+  const region = document.getElementById('auf_region');
+  const hint = document.getElementById('modusHint');
+  const btn = document.getElementById('btnAuftrag');
+  const anzahl = document.getElementById('auf_anzahl');
+  const aktiv = 'var(--cyan)';
+  if (!bBranche || !bSignal) return;
+  for (const b of [bBranche, bSignal]) { b.style.opacity = '0.5'; b.style.outline = 'none'; }
+  if (_suchModus === 'signal') {
+    bSignal.style.opacity = '1'; bSignal.style.outline = '2px solid ' + aktiv;
+    sigRow.style.display = '';
+    if (landRow) landRow.style.display = '';            // DACH-Auswahl nur bei Signal
+    if (lblRegion) lblRegion.textContent = 'Stadt (optional)';
+    if (region) { region.required = false; region.placeholder = 'leer = ganzes Land / DACH'; }
+    hint.innerHTML = '⚡ <strong>Signal-Suche:</strong> findet nur Firmen, die das Kaufsignal ' +
+      'aktuell zeigen (z. B. eine offene Vertriebsstelle) — High-Intent statt Gießkanne. ' +
+      'Stadt optional: leer lassen + Land/DACH wählen für eine breite Suche.';
+    btn.textContent = '⚡ Signal-Suche starten';
+    if (anzahl && parseInt(anzahl.value, 10) > 10) anzahl.value = 8;
+  } else {
+    bBranche.style.opacity = '1'; bBranche.style.outline = '2px solid ' + aktiv;
+    sigRow.style.display = 'none';
+    if (landRow) landRow.style.display = 'none';
+    if (lblRegion) lblRegion.textContent = 'Region / Ort';
+    if (region) { region.required = true; region.placeholder = 'z. B. Köln, NRW'; }
+    hint.innerHTML = 'Standard: durchsucht die ganze Branche in der Region. Breite Abdeckung.';
+    btn.textContent = '→ Kampagne starten';
+  }
 }
 
 async function auftragStarten(e) {
   e.preventDefault();
+  if (_suchModus === 'signal') { return signalSucheStarten(); }
   const btn = document.getElementById('btnAuftrag');
   const msg = document.getElementById('auftragMsg');
   btn.disabled = true; btn.textContent = '⏳ Startet…';
@@ -1859,6 +1997,230 @@ async function auftragStarten(e) {
     msg.innerHTML = `<div class="freigabe-result err" style="display:block">Verbindungsfehler: ${esc(String(e))}</div>`;
     btn.disabled = false; btn.textContent = '→ Kampagne starten';
   }
+}
+
+async function signalSucheStarten() {
+  const btn = document.getElementById('btnAuftrag');
+  const msg = document.getElementById('auftragMsg');
+  btn.disabled = true; btn.textContent = '⏳ Startet…';
+  const landWahl = (document.getElementById('auf_land') || {}).value || 'de';
+  const laender = landWahl === 'dach' ? ['de','at','ch'] : [landWahl];
+  const body = {
+    zielgruppe: document.getElementById('auf_zielgruppe').value.trim(),
+    region:     document.getElementById('auf_region').value.trim(),
+    anzahl:     parseInt(document.getElementById('auf_anzahl').value, 10) || 0,
+    angebot:    document.getElementById('auf_angebot').value.trim(),
+    signal_typ: document.getElementById('auf_signal_typ').value,
+    laender:    laender,
+  };
+  try {
+    const r = await fetch('/api/agent/signal-suche', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.innerHTML = `<div class="freigabe-result ok" style="display:block">⚡ ${esc(d.meldung)}<br>Ergebnisse erscheinen im Tab „⚡ Signal-Leads".</div>`;
+      btn.textContent = '⚡ Läuft…';
+      gotoTab('signalleads');   // Treffer haben einen festen Platz — nicht mehr im Formular versteckt
+      pollSignalLeads();
+    } else {
+      msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ ${esc(d.meldung)}</div>`;
+      btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
+    }
+  } catch (e) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">Verbindungsfehler: ${esc(String(e))}</div>`;
+    btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
+  }
+}
+
+async function pollSignalLeads() {
+  if (_signalPollTimer) clearTimeout(_signalPollTimer);
+  let d = {};
+  try {
+    const r = await fetch('/api/agent/signal-leads', { headers: _adminHeaders({'Content-Type': undefined}) });
+    d = await r.json();
+  } catch (e) { d = { status: 'fehler', meldung: String(e), leads: [] }; }
+  renderSignalLeads(d);
+  const btn = document.getElementById('btnAuftrag');
+  if (d.status === 'laeuft') {
+    _signalPollTimer = setTimeout(pollSignalLeads, 4000);
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten'; }
+  }
+}
+
+// Lädt den letzten Signal-Stand einmalig (Tab-Öffnen + Seitenstart) — damit die
+// Treffer dauerhaft auffindbar sind und nicht nur während des Pollings sichtbar.
+async function loadSignalLeads() {
+  let d = {};
+  try {
+    const r = await fetch('/api/agent/signal-leads', { headers: _adminHeaders({'Content-Type': undefined}) });
+    d = await r.json();
+  } catch (e) { d = { status: 'keiner', meldung: String(e), leads: [] }; }
+  renderSignalLeads(d);
+}
+
+// Wechselt programmatisch auf einen Tab (löst dieselbe Logik aus wie ein Klick).
+function gotoTab(view) {
+  const tab = document.querySelector('.tab[data-view="' + view + '"]');
+  if (tab) tab.click();
+}
+
+document.getElementById('tab-signalleads').addEventListener('click', loadSignalLeads);
+
+let _signalRuns = [];
+
+function _signalLeadById(leadId) {
+  for (const r of _signalRuns) for (const l of (r.leads || [])) if (l.lead_id === leadId) return l;
+  return null;
+}
+function _domId(leadId) { return 'sl_' + String(leadId).replace(/[^a-z0-9]/gi, '_'); }
+
+function renderSignalLeads(d) {
+  const box = document.getElementById('signalLeadsTab');
+  if (!box) return;
+  _signalRuns = d.runs || [];
+  const total = _signalRuns.reduce((a, r) => a + ((r.leads || []).length), 0);
+  const cnt = document.getElementById('signalLeadsCount');
+  if (cnt) cnt.textContent = total;
+  const kopf = (t, c) => `<div class="freigabe-result ${c}" style="display:block;margin-bottom:12px">${t}</div>`;
+  let head = '';
+  if (d.status === 'laeuft') head = kopf(`⏳ ${esc(d.meldung || 'Signal-Suche läuft…')}`, 'ok');
+  else if (d.status === 'fehler') head = kopf(`⚠️ ${esc(d.meldung || 'Fehler')}`, 'err');
+  else if (d.status === 'fertig') head = kopf(`✅ ${esc(d.meldung || 'Fertig')}`, 'ok');
+
+  if (_signalRuns.length === 0) {
+    box.innerHTML = head + emptyState('⚡', 'Noch keine Signal-Suche',
+      'Starte unter „Neuer Auftrag" eine Signal-Suche (Modus ⚡). ' +
+      'Die Treffer landen hier — getaggt nach Suche, dauerhaft und einzeln löschbar.');
+    return;
+  }
+  const sections = _signalRuns.map(r => {
+    const n = (r.leads || []).length;
+    const cards = (r.leads || []).map(_signalLeadCard).join('')
+      || `<div class="lead-detail" style="color:var(--text3)">— keine Leads in dieser Suche —</div>`;
+    return `
+    <div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+        <div style="font-weight:600;color:var(--text2);font-size:13px">🔎 ${esc(r.label || 'Suche')}
+          <span style="color:var(--text3);font-weight:400">· ${n} Lead${n === 1 ? '' : 's'}</span></div>
+        <button onclick="signalRunLoeschen('${esc(r.run_id)}')"
+          style="background:none;border:1px solid var(--border);color:var(--text3);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap">🗑 Ganze Suche löschen</button>
+      </div>
+      <div class="leads-grid">${cards}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML = head + sections;
+}
+
+function _signalLeadCard(l) {
+  const s = l.score || 0;
+  const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+  const did = _domId(l.lead_id);
+  const gruende = (l.gruende || []).map(g => `<div class="lead-detail">
+      <span class="lead-icon">✓</span>
+      <span style="color:var(--text2);font-size:12px">${esc(g)}</span></div>`).join('');
+  const btn = (txt, fn, extra) => `<button onclick="${fn}"
+    style="background:none;border:1px solid var(--border);color:var(--text3);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;${extra || ''}">${txt}</button>`;
+  return `
+  <div class="lead-card" id="card_${did}">
+    <div class="lead-header">
+      <div class="lead-firma">${esc(l.firma || '—')}</div>
+      <div class="score-badge ${scoreClass}">${s > 0 ? s : '—'}</div>
+    </div>
+    ${l.signal_label ? `<div class="lead-detail"><span class="lead-icon">⚡</span>
+      <span style="color:var(--green);font-size:12px;font-weight:600">${esc(l.signal_label)}</span></div>` : ''}
+    ${l.signal_titel ? `<div class="lead-detail"><span class="lead-icon">📋</span>
+      <span style="color:var(--text3);font-size:11px">${esc(l.signal_titel.slice(0,80))}</span></div>` : ''}
+    ${l.aufhaenger ? `<div class="lead-detail" style="margin-top:6px;padding:8px;background:rgba(34,211,238,.08);border-radius:6px;align-items:flex-start">
+      <span class="lead-icon">✍️</span>
+      <span style="color:var(--text2);font-size:12px;font-style:italic">${esc(l.aufhaenger)}</span></div>` : ''}
+    ${l.mail_body ? `<details style="margin-top:6px">
+      <summary style="cursor:pointer;color:var(--cyan);font-size:11px">📧 Personalisierte Erstmail ansehen</summary>
+      ${l.mail_betreff ? `<div style="font-weight:600;font-size:12px;margin:6px 0 4px;color:var(--text2)">${esc(l.mail_betreff)}</div>` : ''}
+      <pre style="white-space:pre-wrap;font-family:inherit;font-size:11px;color:var(--text3);margin:0;line-height:1.5">${esc(l.mail_body)}</pre></details>` : ''}
+    ${l.telefon ? `<div class="lead-detail"><span class="lead-icon">📞</span>
+      <span class="lead-phone">${esc(l.telefon)}</span></div>` : ''}
+    ${l.ansprechpartner ? `<div class="lead-detail"><span class="lead-icon">👤</span>
+      <span>${esc(l.ansprechpartner)}</span></div>` : ''}
+    ${l.email ? `<div class="lead-detail"><span class="lead-icon">✉️</span>
+      <span style="color:var(--text3);font-size:11px">${esc(l.email)}</span></div>` : ''}
+    ${l.notiz ? `<div class="lead-detail"><span class="lead-icon">📝</span>
+      <span style="color:var(--text2);font-size:12px">${esc(l.notiz)}</span></div>` : ''}
+    ${l.website ? `<div class="lead-detail"><span class="lead-icon">🌐</span>
+      <span style="color:var(--text3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">${esc(l.website.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span></div>` : ''}
+    ${gruende}
+    ${l.signal_quelle_url ? `<div class="lead-detail" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+      <span class="lead-icon">🔗</span>
+      <a href="${esc(l.signal_quelle_url)}" target="_blank" rel="noopener"
+         style="color:var(--cyan);font-size:11px">Signal-Quelle ansehen</a></div>` : ''}
+    <div class="lead-detail" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);gap:8px">
+      ${btn('✏️ Bearbeiten', `signalLeadEditToggle('${esc(l.lead_id)}')`)}
+      ${btn('🗑 Löschen', `signalLeadLoeschen('${esc(l.lead_id)}')`, 'border-color:rgba(255,90,90,.4);color:#ff8a8a')}
+    </div>
+    <div id="edit_${did}" style="display:none;margin-top:8px"></div>
+  </div>`;
+}
+
+function signalLeadEditToggle(leadId) {
+  const did = _domId(leadId);
+  const box = document.getElementById('edit_' + did);
+  if (!box) return;
+  if (box.style.display !== 'none') { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const l = _signalLeadById(leadId) || {};
+  const row = (label, id, val) => `<div style="margin-bottom:6px">
+    <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:2px">${label}</label>
+    <input id="${id}_${did}" class="setup-input" style="font-size:12px;padding:6px 8px" value="${esc(val || '')}"></div>`;
+  box.style.display = 'block';
+  box.innerHTML =
+    row('Firma', 'efirma', l.firma) +
+    row('Telefon', 'etel', l.telefon) +
+    row('E-Mail', 'email', l.email) +
+    row('Ansprechpartner', 'eap', l.ansprechpartner) +
+    row('Notiz', 'enotiz', l.notiz) +
+    `<div style="display:flex;gap:8px;margin-top:6px">
+      <button onclick="signalLeadSpeichern('${esc(leadId)}')" class="setup-btn" style="padding:6px 12px;font-size:12px">💾 Speichern</button>
+      <button onclick="signalLeadEditToggle('${esc(leadId)}')" style="background:none;border:1px solid var(--border);color:var(--text3);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer">Abbrechen</button>
+    </div>`;
+}
+
+async function signalLeadSpeichern(leadId) {
+  const did = _domId(leadId);
+  const v = (id) => (document.getElementById(id + '_' + did) || {}).value || '';
+  const fields = {
+    company_name: v('efirma').trim(),
+    phone: v('etel').trim(),
+    email: v('email').trim(),
+    contact_full_name: v('eap').trim(),
+    notiz: v('enotiz').trim(),
+  };
+  try {
+    await fetch('/api/agent/signal-lead-aendern', {
+      method: 'POST', headers: _adminHeaders(),
+      body: JSON.stringify({ lead_id: leadId, fields }),
+    });
+  } catch (e) {}
+  loadSignalLeads();
+}
+
+async function signalLeadLoeschen(leadId) {
+  if (!confirm('Diesen Lead löschen?')) return;
+  try {
+    await fetch('/api/agent/signal-lead-loeschen', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify({ lead_id: leadId }),
+    });
+  } catch (e) {}
+  loadSignalLeads();
+}
+
+async function signalRunLoeschen(runId) {
+  if (!confirm('Die GANZE Suche mit allen ihren Leads löschen?')) return;
+  try {
+    await fetch('/api/agent/signal-run-loeschen', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify({ run_id: runId }),
+    });
+  } catch (e) {}
+  loadSignalLeads();
 }
 
 function _datumKurz(wert) {
@@ -2428,6 +2790,216 @@ async function mandantLoeschen(benutzername) {
   } catch (e) {
     alert('Fehler: ' + e);
   }
+}
+
+// ─── Angebote (Multi-Offer) ────────────────────────────────────────────────
+// Mehrere Akquise-Angebote unter EINEM Account: je eigener Mailtext, Betreff,
+// PDF + Such-Vorbelegung. Der Sender bleibt immer derselbe (Engine-.env).
+let _angebote = [];
+let _angebotAktiv = '';
+
+document.getElementById('tab-angebote').addEventListener('click', ladenAngebote);
+
+async function ladenAngebote() {
+  try {
+    const r = await fetch('/api/admin/profile', { headers: _adminHeaders({'Content-Type': undefined}) });
+    if (r.status === 401 || r.status === 403) { return; }  // kein Admin → still
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.meldung || 'Fehler');
+    _angebote = d.profile || [];
+    _angebotAktiv = d.aktiv || (_angebote[0] && _angebote[0].id) || '';
+    renderAngebotDropdown();
+    renderAngeboteEditor();
+  } catch (e) {
+    const el = document.getElementById('angeboteContent');
+    if (el) el.innerHTML = emptyState('⚠️', 'Angebote nicht geladen', String(e));
+  }
+}
+
+function renderAngebotDropdown() {
+  const picker = document.getElementById('angebotPicker');
+  const dd = document.getElementById('angebotDropdown');
+  if (!picker || !dd) return;
+  if (!_angebote.length) { picker.style.display = 'none'; return; }
+  picker.style.display = 'flex';
+  dd.innerHTML = _angebote.map(p =>
+    `<option value="${esc(p.id)}" ${p.id === _angebotAktiv ? 'selected' : ''}>${esc(p.name)}</option>`
+  ).join('');
+}
+
+async function angebotWechseln(id) {
+  try {
+    const r = await fetch('/api/admin/profile/aktiv', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify({ id }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      _angebote = d.profile || _angebote;
+      _angebotAktiv = d.aktiv;
+      renderAngebotDropdown();
+      renderAngeboteEditor();
+      // Auftrag-Form ggf. neu vorbelegen, falls sichtbar
+      if (document.getElementById('view-auftrag').classList.contains('active')) renderAuftragForm();
+    }
+  } catch (e) { alert('Fehler: ' + e); }
+}
+
+function _angebotAktivObj() {
+  return _angebote.find(p => p.id === _angebotAktiv) || _angebote[0] || null;
+}
+
+function renderAngeboteEditor() {
+  const el = document.getElementById('angeboteContent');
+  if (!el) return;
+  const opts = _angebote.map(p =>
+    `<button type="button" class="setup-btn" style="padding:6px 12px;font-size:12px;margin:0 6px 6px 0;
+      ${p.id === _angebotAktiv ? 'outline:2px solid var(--cyan)' : 'opacity:.6'}"
+      onclick="angebotWechseln('${esc(p.id)}')">${esc(p.name)}${p.id === _angebotAktiv ? ' ✓' : ''}</button>`
+  ).join('');
+  const p = _angebotAktivObj() || { id:'', name:'', branche:'', stadt:'', lead_anzahl:10, betreff:'', mailtext:'', pdf:'' };
+  const istNeu = !p.id;
+  el.innerHTML = `
+    <div style="max-width:760px">
+      <div class="setup-hint">
+        🎯 <strong>Angebote</strong> — mehrere Akquise-Angebote unter deinem EINEN Account.
+        Jedes Angebot hat eigenen Mailtext, Betreff, PDF-Anhang und Such-Vorbelegung.
+        <strong>Der Absender bleibt immer deine Mail</strong> — nur Inhalt + Anhang wechseln.
+        Oben rechts schaltest du global um, welches Angebot gerade aktiv ist.
+      </div>
+      <div class="setup-h2" style="margin-top:18px">Aktives Angebot wählen</div>
+      <div style="margin-bottom:6px">${opts}
+        <button type="button" class="setup-btn" style="padding:6px 12px;font-size:12px;margin:0 6px 6px 0"
+          onclick="angebotNeu()">+ Neues Angebot</button>
+      </div>
+      <div id="angebotMsg"></div>
+
+      <div class="setup-h2" style="margin-top:24px">${istNeu ? 'Neues Angebot' : 'Angebot bearbeiten'}</div>
+      <form id="formAngebot" onsubmit="angebotSpeichern(event)">
+        <input type="hidden" id="ang_id" value="${esc(p.id)}">
+        <div class="setup-form-row">
+          <label class="setup-label">Name (intern, fürs Dropdown)</label>
+          <input type="text" class="setup-input" id="ang_name" value="${esc(p.name)}"
+            placeholder="z. B. Kunde A – Termin-Akquise" required>
+        </div>
+        <div class="setup-form-row" style="display:flex;gap:12px">
+          <div style="flex:1">
+            <label class="setup-label">Such-Branche (Vorbelegung)</label>
+            <input type="text" class="setup-input" id="ang_branche" value="${esc(p.branche)}"
+              placeholder="z. B. Steuerberater">
+          </div>
+          <div style="flex:1">
+            <label class="setup-label">Such-Stadt (Vorbelegung)</label>
+            <input type="text" class="setup-input" id="ang_stadt" value="${esc(p.stadt)}"
+              placeholder="z. B. Bonn">
+          </div>
+          <div style="width:120px">
+            <label class="setup-label">Leads</label>
+            <input type="number" class="setup-input" id="ang_anzahl" value="${p.lead_anzahl || 10}" min="1">
+          </div>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Betreff der Erstmail <span style="color:var(--text3)">(leer = Standard-Betreff)</span></label>
+          <input type="text" class="setup-input" id="ang_betreff" value="${esc(p.betreff)}"
+            placeholder="z. B. Mehr Termine für Ihre Kanzlei">
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">Mailtext der Erstmail <span style="color:var(--text3)">(leer = Standard-Text)</span></label>
+          <textarea class="setup-input" id="ang_mailtext" rows="11"
+            style="font-family:inherit;line-height:1.5;resize:vertical"
+            placeholder="Platzhalter: {anrede}  {name}  {firma}  {branche}">${esc(p.mailtext)}</textarea>
+          <div class="setup-hint" style="margin-top:6px">
+            Platzhalter: <code>{anrede}</code> (z. B. „Guten Tag Herr Müller,"),
+            <code>{name}</code>, <code>{firma}</code>, <code>{branche}</code>.
+            Vergiss die Signatur (Name, Telefon, Mail) nicht im Text.
+          </div>
+        </div>
+        <div class="setup-form-row">
+          <label class="setup-label">PDF-Anhang <span style="color:var(--text3)">(leer = Standard-PDF)</span></label>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="file" id="ang_pdf" accept="application/pdf"
+              style="font-size:13px;color:var(--text2)">
+            <span style="font-size:12px;color:var(--text3)">${p.pdf ? '📎 ' + esc(p.pdf.split(/[\\\\/]/).pop()) : 'noch keins'}</span>
+          </div>
+          <div class="setup-hint" style="margin-top:6px">PDF wird beim Speichern hochgeladen (max. 8 MB).</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="submit" class="setup-btn" id="btnAngebotSave">💾 Speichern</button>
+          ${(!istNeu && _angebote.length > 1) ? `<button type="button" class="setup-btn"
+            style="background:rgba(255,71,87,0.1);color:var(--red);border-color:var(--red)"
+            onclick="angebotLoeschen('${esc(p.id)}')">Löschen</button>` : ''}
+        </div>
+      </form>
+    </div>`;
+}
+
+function angebotNeu() {
+  _angebote.push({ id:'', name:'', branche:'', stadt:'', lead_anzahl:10, betreff:'', mailtext:'', pdf:'' });
+  _angebotAktiv = '';
+  renderAngeboteEditor();
+}
+
+async function angebotSpeichern(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnAngebotSave');
+  const msg = document.getElementById('angebotMsg');
+  btn.disabled = true; btn.textContent = '⏳ Speichert…';
+  const body = {
+    id: document.getElementById('ang_id').value.trim(),
+    name: document.getElementById('ang_name').value.trim(),
+    branche: document.getElementById('ang_branche').value.trim(),
+    stadt: document.getElementById('ang_stadt').value.trim(),
+    lead_anzahl: parseInt(document.getElementById('ang_anzahl').value, 10) || 10,
+    betreff: document.getElementById('ang_betreff').value.trim(),
+    mailtext: document.getElementById('ang_mailtext').value,
+  };
+  try {
+    const r = await fetch('/api/admin/profile', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.meldung || 'Fehler');
+    _angebote = d.profile || [];
+    // Ziel-Profil finden (per Name, da neue ID serverseitig vergeben wird)
+    const ziel = _angebote.find(x => x.name === body.name) || _angebote.find(x => x.id === body.id);
+    const zielId = ziel ? ziel.id : (d.aktiv || body.id);
+
+    // PDF-Upload, falls eine Datei gewählt wurde
+    const fileInput = document.getElementById('ang_pdf');
+    if (fileInput && fileInput.files && fileInput.files.length) {
+      btn.textContent = '⏳ Lädt PDF…';
+      const buf = await fileInput.files[0].arrayBuffer();
+      const up = await fetch('/api/admin/profile/pdf?id=' + encodeURIComponent(zielId), {
+        method: 'POST',
+        headers: _adminHeaders({ 'Content-Type': 'application/pdf' }),
+        body: buf,
+      });
+      const ud = await up.json();
+      if (!ud.ok) throw new Error('PDF: ' + (ud.meldung || 'Fehler'));
+      _angebote = ud.profile || _angebote;
+    }
+    msg.innerHTML = `<div class="freigabe-result ok" style="display:block">✅ Angebot gespeichert.</div>`;
+    _angebotAktiv = zielId;
+    renderAngebotDropdown();
+    renderAngeboteEditor();
+  } catch (err) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ ${esc(String(err))}</div>`;
+    btn.disabled = false; btn.textContent = '💾 Speichern';
+  }
+}
+
+async function angebotLoeschen(id) {
+  if (!confirm('Dieses Angebot wirklich löschen?')) return;
+  try {
+    const r = await fetch('/api/admin/profile/loeschen', {
+      method: 'POST', headers: _adminHeaders(), body: JSON.stringify({ id }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.meldung || 'Fehler');
+    _angebote = d.profile || [];
+    _angebotAktiv = d.aktiv;
+    renderAngebotDropdown();
+    renderAngeboteEditor();
+  } catch (e) { alert('Fehler: ' + e); }
 }
 </script>
 </body>

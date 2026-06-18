@@ -105,6 +105,83 @@ class AgentRunner:
         threading.Thread(target=_arbeit, daemon=True).start()
         return auftrag.auftrags_id
 
+    def signal_suche_im_hintergrund(
+        self, auftrag: Auftrag, signal_typ: str = "sales_hiring", laender=("de",)
+    ) -> str:
+        """Startet eine Signal-Suche (High-Intent-Targeting) asynchron.
+
+        Eigener Pfad neben dem normalen Agenten-Lauf: ruft die Bridge-Aktion
+        ``suchen_per_signal`` direkt im Daemon-Thread auf und schreibt den Stand
+        (laeuft|fertig|fehler) für die UI. KEIN Versand. Der bestehende
+        Brain-/Kampagnen-Pfad bleibt unberührt.
+        """
+        if self._bridge is None:
+            raise RuntimeError("Keine Bridge verbunden.")
+        if auftrag.status == AuftragsStatus.ENTWURF:
+            auftrag.bestaetigen()
+        self._bridge.signal_status_schreiben(
+            "laeuft",
+            f"Signal-Suche läuft: {auftrag.zielgruppe} · {auftrag.region} "
+            f"({self._bridge._SIGNAL_LABELS.get(signal_typ, signal_typ)})…",
+        )
+
+        def _arbeit() -> None:
+            try:
+                res = self._bridge.suchen_per_signal(auftrag, signal_typ=signal_typ, laender=laender)
+                if res.ok:
+                    self._bridge.signal_status_schreiben(
+                        "fertig", res.meldung,
+                        extra={"anzahl": res.leads_gefunden},
+                    )
+                else:
+                    self._bridge.signal_status_schreiben("fehler", res.meldung)
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"\n[runner] FEHLER Signal-Suche {auftrag.auftrags_id[:8]}:\n"
+                    f"{traceback.format_exc()}",
+                    flush=True,
+                )
+                try:
+                    self._bridge.signal_status_schreiben("fehler", str(exc))
+                except Exception:
+                    pass
+
+        threading.Thread(target=_arbeit, daemon=True).start()
+        return auftrag.auftrags_id
+
+    def signal_status(self) -> dict:
+        """Aktueller Stand der Signal-Suche (für UI-Polling)."""
+        if self._bridge is None:
+            return {"status": "keiner", "meldung": "Keine Bridge verbunden."}
+        return self._bridge.signal_status_lesen()
+
+    def signal_leads(self) -> list[dict]:
+        """UI-fertige Signal-Leads des letzten Laufs."""
+        if self._bridge is None:
+            return []
+        return self._bridge.signal_leads_lesen()
+
+    def signal_runs(self) -> list[dict]:
+        """Alle gespeicherten Signal-Suchen (getaggt, neueste zuerst)."""
+        if self._bridge is None:
+            return []
+        return self._bridge.signal_runs_lesen()
+
+    def signal_lead_loeschen(self, lead_id: str) -> int:
+        if self._bridge is None:
+            return 0
+        return self._bridge.signal_lead_loeschen(lead_id)
+
+    def signal_run_loeschen(self, run_id: str) -> int:
+        if self._bridge is None:
+            return 0
+        return self._bridge.signal_run_loeschen(run_id)
+
+    def signal_lead_aendern(self, lead_id: str, fields: dict) -> int:
+        if self._bridge is None:
+            return 0
+        return self._bridge.signal_lead_aendern(lead_id, fields)
+
     def _baue_brain(self, auftrag: Auftrag) -> Brain:
         kontext = AgentKontext(
             auftrag=auftrag, bridge=self._bridge, reporter=self._reporter

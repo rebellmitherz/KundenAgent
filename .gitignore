@@ -10,6 +10,23 @@ product/product_config.json
 product/product_smtp.json
 product_config.json
 product_smtp.json
+# auch Varianten wie product_smtp_kontakt.json (enthalten Mail-Passwort)
+product/product_smtp*.json
+product_smtp*.json
+
+# Sperrliste / Kontaktdaten (echte E-Mail-Adressen = PII) — nie einchecken
+product/config/
+
+# Runtime-Output (Leads/Reports/Mail-Vorbereitung, enthält PII) — nie einchecken
+/output/
+product/output/
+
+# Backups / Vorschau-Artefakte (Wegwerf)
+*.bak_*
+_final_preview_*.png
+
+# Angebot-Profile (Mailtexte/PDF-Pfade pro Deployment) — kein Secret, aber lokale Config
+product/product_profiles.json
 *.env
 .env
 

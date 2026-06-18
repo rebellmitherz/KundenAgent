@@ -36,9 +36,25 @@ from product.auth.sessions import (
     mandanten_lesen, mandant_anlegen, mandant_pw_setzen, mandant_loeschen,
     benutzername_gueltig, sichere_id,
 )
+from product.profile import store as profil_store
 
 _CONFIG_PFAD = _PRODUCT_ROOT / "product" / "product_config.json"
 _SMTP_PFAD = _PRODUCT_ROOT / "product" / "product_smtp.json"
+
+
+def _vorhandenes_pdf(profil_id: str) -> str:
+    """Bestehenden PDF-Pfad eines Profils zurückgeben (oder ''). Damit ein
+    Profil-Speichern OHNE Upload den vorhandenen Anhang nicht verliert."""
+    pid = str(profil_id or "").strip()
+    if not pid:
+        return ""
+    try:
+        for p in profil_store.laden()["profile"]:
+            if p["id"] == profil_store._slug(pid):
+                return p.get("pdf", "")
+    except Exception:
+        pass
+    return ""
 
 
 def _erstelle_mandant_runner(mandant_id: str) -> "AgentRunner | None":
@@ -78,6 +94,9 @@ _data_dir_global: str | None = None
 # Admin-Token (aus Config geladen, leer = kein Schutz aktiv)
 _ui_token: str = ""
 
+# Länder für die Signal-Suche (DACH). Spiegelt signal_discovery._DACH.
+_DACH = ("de", "at", "ch")
+
 # Kunden-Endpunkte: nie Token-Pflicht.
 # Admin-Endpunkte: Token-Pflicht wenn _ui_token gesetzt.
 _KUNDEN_ENDPUNKTE = {"/", "/index.html", "/api/status", "/api/leads",
@@ -87,10 +106,15 @@ _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/setup/config", "/api/setup/smtp", "/api/freigabe",
                      "/api/agent/lauf", "/api/agent/freigeben",
                      "/api/agent/nachfassen", "/api/agent/auftrag",
+                     "/api/agent/signal-suche", "/api/agent/signal-leads",
+                     "/api/agent/signal-lead-loeschen", "/api/agent/signal-run-loeschen",
+                     "/api/agent/signal-lead-aendern",
                      "/api/agent/termin-abschliessen", "/api/agent/antworten-abrufen",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/events", "/api/closer/skript",
-                     "/api/closer/starten", "/api/closer/stoppen"}
+                     "/api/closer/starten", "/api/closer/stoppen",
+                     "/api/admin/profile", "/api/admin/profile/aktiv",
+                     "/api/admin/profile/loeschen", "/api/admin/profile/pdf"}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -140,6 +164,22 @@ class _Handler(BaseHTTPRequestHandler):
         if mandant_id not in _mandant_runners:
             _mandant_runners[mandant_id] = _erstelle_mandant_runner(mandant_id)
         return _mandant_runners[mandant_id]
+
+    def _profil_aktiv_anwenden(self) -> None:
+        """Spielt die Env des aktiven Angebot-Profils (Mailtext/Betreff/PDF) auf
+        die geteilte Engine-Bridge — VOR jedem Such-/Freigabe-/Nachfass-Aufruf.
+
+        Hinweis (bewusst, v1): Der Erstmail-Text + Betreff werden beim Suchlauf
+        in die Pipeline gebacken (pro Lead fest). Der PDF-Anhang wird erst beim
+        Senden angehängt. Solange ein Angebot von Suche bis Freigabe aktiv bleibt
+        (normaler Ablauf), passt alles zusammen. Wechselt man das Angebot zwischen
+        Suche und Freigabe eines NOCH offenen Stapels, folgt der PDF-Anhang dem
+        dann aktiven Angebot (Text/Betreff bleiben am Lead fest)."""
+        if _bridge is not None:
+            try:
+                _bridge.profil_setzen(profil_store.aktives_profil_env())
+            except Exception as e:  # noqa: BLE001 — Profil darf den Lauf nie blockieren
+                print(f"[ui] Profil-Env konnte nicht gesetzt werden: {e}")
 
     def _ist_eingeloggt(self) -> bool:
         if _ui_token and self.headers.get("X-Access-Token", "") == _ui_token:
@@ -205,6 +245,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_agent_laeufe()
         elif self.path == "/api/agent/antworten":
             self._serve_agent_antworten()
+        elif self.path == "/api/agent/signal-leads":
+            self._serve_signal_leads()
         elif self.path == "/api/agent/nachfass-faellig":
             self._serve_agent_nachfass_faellig()
         elif self.path.split("?", 1)[0] == "/api/agent/funnel":
@@ -241,6 +283,10 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._serve_mandanten_list()
+        elif self.path == "/api/admin/profile":
+            if not self._ist_admin():
+                self._403(); return
+            self._serve_profile_list()
         else:
             self._404()
 
@@ -276,6 +322,20 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._handle_agent_auftrag()
+        elif self.path == "/api/agent/signal-suche":
+            self._handle_agent_signal_suche()
+        elif self.path == "/api/agent/signal-lead-loeschen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_signal_lead_loeschen()
+        elif self.path == "/api/agent/signal-run-loeschen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_signal_run_loeschen()
+        elif self.path == "/api/agent/signal-lead-aendern":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_signal_lead_aendern()
         elif self.path == "/api/agent/termin-abschliessen":
             if not self._ist_admin():
                 self._403(); return
@@ -310,6 +370,22 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._handle_mandanten_update()
+        elif self.path == "/api/admin/profile":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_profile_save()
+        elif self.path == "/api/admin/profile/aktiv":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_profile_aktiv()
+        elif self.path == "/api/admin/profile/loeschen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_profile_loeschen()
+        elif self.path.split("?", 1)[0] == "/api/admin/profile/pdf":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_profile_pdf()
         else:
             self._404()
 
@@ -502,6 +578,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "meldung": "Agent nicht verbunden."})
             return
         try:
+            self._profil_aktiv_anwenden()
             ergebnis = runner.nachfassen(auftrags_id, limit=limit, bestaetigt=True)
             self._json(ergebnis)
         except Exception as e:
@@ -543,6 +620,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            self._profil_aktiv_anwenden()
             auftrag = Auftrag(
                 zielgruppe=zielgruppe, region=region,
                 lead_anzahl=anzahl, angebot=angebot or "—",
@@ -555,6 +633,134 @@ class _Handler(BaseHTTPRequestHandler):
             })
         except Exception as e:
             self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_agent_signal_suche(self):
+        """POST /api/agent/signal-suche — startet eine Signal-Suche (High-Intent).
+
+        Body: {zielgruppe, region, anzahl, signal_typ}. Läuft asynchron, sucht
+        Firmen anhand eines Kaufsignals statt flach nach Branche. KEIN Versand.
+        Antwort: {ok, meldung}.
+        """
+        import json as _json
+        d = {}
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+        except Exception:
+            pass
+
+        zielgruppe = str(d.get("zielgruppe", "")).strip()
+        region = str(d.get("region", "")).strip()   # Stadt — jetzt OPTIONAL
+        angebot = str(d.get("angebot", "")).strip()
+        signal_typ = str(d.get("signal_typ", "sales_hiring")).strip() or "sales_hiring"
+        # Länder-Auswahl (DACH). Akzeptiert Liste ["de","at"] ODER String "dach"/"de".
+        roh_land = d.get("laender", d.get("land", ["de"]))
+        if isinstance(roh_land, str):
+            roh_land = _DACH if roh_land.strip().lower() == "dach" else [roh_land]
+        laender = tuple(str(x).strip().lower() for x in (roh_land or []) if str(x).strip())
+        laender = tuple(l for l in laender if l in _DACH) or ("de",)
+        try:
+            anzahl = int(d.get("anzahl", 0))
+        except (TypeError, ValueError):
+            anzahl = 0
+
+        from product.bridge.signal_discovery import SIGNAL_TYPES
+        if signal_typ not in SIGNAL_TYPES:
+            self._json({"ok": False, "meldung": f"Unbekannter Signaltyp: {signal_typ}"})
+            return
+        if not zielgruppe:
+            self._json({"ok": False, "meldung": "Zielgruppe (Branche) ist Pflicht."})
+            return
+        if anzahl <= 0:
+            self._json({"ok": False, "meldung": "Bitte eine Lead-Anzahl > 0 angeben."})
+            return
+        runner = self._get_runner()
+        if not runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."})
+            return
+        try:
+            self._profil_aktiv_anwenden()
+            auftrag = Auftrag(
+                zielgruppe=zielgruppe, region=region,
+                lead_anzahl=anzahl, angebot=angebot or "—",
+            )
+            runner.signal_suche_im_hintergrund(auftrag, signal_typ=signal_typ, laender=laender)
+            wo = region if region else (", ".join(l.upper() for l in laender))
+            self._json({
+                "ok": True,
+                "meldung": f"Signal-Suche gestartet: {zielgruppe} · {wo}. "
+                           "Ergebnisse erscheinen, sobald der Lauf fertig ist.",
+            })
+        except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _serve_signal_leads(self):
+        """GET /api/agent/signal-leads — Stand + Leads der Signal-Suche."""
+        runner = self._get_runner()
+        if not runner:
+            self._json({"status": "keiner", "meldung": "Agent nicht verbunden.", "leads": []})
+            return
+        try:
+            stand = runner.signal_status()
+            runs = runner.signal_runs()
+            # Flach für Abwärtskompatibilität (alte UI-Pfade); neu: runs (getaggt).
+            leads = [l for r in runs for l in r.get("leads", [])]
+            self._json({
+                "status": stand.get("status", "keiner"),
+                "meldung": stand.get("meldung", ""),
+                "runs": runs,
+                "leads": leads,
+            })
+        except Exception as e:
+            self._json({"status": "fehler", "meldung": str(e), "runs": [], "leads": []})
+
+    def _signal_body(self) -> dict:
+        import json as _json
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+                return d if isinstance(d, dict) else {}
+        except Exception:
+            pass
+        return {}
+
+    def _handle_signal_lead_loeschen(self):
+        """POST /api/agent/signal-lead-loeschen — einen Lead löschen. Body: {lead_id}."""
+        runner = self._get_runner()
+        if not runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."}); return
+        lead_id = str(self._signal_body().get("lead_id", "")).strip()
+        if not lead_id:
+            self._json({"ok": False, "meldung": "lead_id fehlt."}); return
+        n = runner.signal_lead_loeschen(lead_id)
+        self._json({"ok": n > 0, "geloescht": n})
+
+    def _handle_signal_run_loeschen(self):
+        """POST /api/agent/signal-run-loeschen — ganze Suche löschen. Body: {run_id}."""
+        runner = self._get_runner()
+        if not runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."}); return
+        run_id = str(self._signal_body().get("run_id", "")).strip()
+        if not run_id:
+            self._json({"ok": False, "meldung": "run_id fehlt."}); return
+        n = runner.signal_run_loeschen(run_id)
+        self._json({"ok": n > 0, "geloescht": n})
+
+    def _handle_signal_lead_aendern(self):
+        """POST /api/agent/signal-lead-aendern — Lead inline editieren.
+        Body: {lead_id, fields:{company_name?,phone?,email?,contact_full_name?,notiz?}}."""
+        runner = self._get_runner()
+        if not runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."}); return
+        d = self._signal_body()
+        lead_id = str(d.get("lead_id", "")).strip()
+        fields = d.get("fields") if isinstance(d.get("fields"), dict) else {}
+        if not lead_id or not fields:
+            self._json({"ok": False, "meldung": "lead_id oder fields fehlt."}); return
+        n = runner.signal_lead_aendern(lead_id, fields)
+        self._json({"ok": n > 0, "geaendert": n})
 
     def _handle_agent_termin_abschliessen(self):
         """POST /api/agent/termin-abschliessen — Termin als erledigt markieren.
@@ -640,6 +846,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             # Das Erreichen dieses Endpunkts SETZT den menschlichen Freigabe-Klick
             # voraus (Modal-Bestätigung) → bestaetigt=True.
+            self._profil_aktiv_anwenden()
             ergebnis = _bridge.freigabe_ausfuehren(limit=limit, bestaetigt=True)
             self._json({
                 "ok": ergebnis.ok,
@@ -676,6 +883,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "meldung": "Agent nicht verbunden."})
             return
         try:
+            self._profil_aktiv_anwenden()
             ergebnis = runner.freigeben(auftrags_id, limit=limit, bestaetigt=True)
             self._json(ergebnis)
         except Exception as e:
@@ -911,6 +1119,125 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._json({"ok": False, "meldung": "Aktion nicht erkannt."})
 
+    # --- Angebot-Profile (Multi-Offer) — alle Admin-only -------------------
+
+    def _lese_json_body(self) -> dict:
+        """Liest den Request-Body als JSON-Objekt (leer/kaputt → {})."""
+        import json as _json
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+            if laenge > 0:
+                d = _json.loads(self.rfile.read(laenge))
+                return d if isinstance(d, dict) else {}
+        except Exception:
+            pass
+        return {}
+
+    def _serve_profile_list(self):
+        """GET /api/admin/profile — alle Angebot-Profile + aktive ID."""
+        try:
+            data = profil_store.laden()
+            self._json({"ok": True, "aktiv": data["aktiv"], "profile": data["profile"]})
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_profile_save(self):
+        """POST /api/admin/profile — Profil anlegen/aktualisieren (Upsert by id).
+
+        Body: {id?, name, branche, stadt, lead_anzahl, betreff, mailtext}.
+        Der PDF-Anhang wird separat über /api/admin/profile/pdf hochgeladen.
+        """
+        d = self._lese_json_body()
+        name = str(d.get("name", "")).strip()
+        if not name:
+            self._json({"ok": False, "meldung": "Name ist Pflicht."})
+            return
+        try:
+            data = profil_store.profil_speichern({
+                "id": d.get("id", ""),
+                "name": name,
+                "branche": d.get("branche", ""),
+                "stadt": d.get("stadt", ""),
+                "lead_anzahl": d.get("lead_anzahl", 10),
+                "betreff": d.get("betreff", ""),
+                "mailtext": d.get("mailtext", ""),
+                # pdf bewusst NICHT aus diesem Body übernehmen — Upload-Pfad ist
+                # die einzige Quelle, sonst überschriebe ein Speichern ohne pdf
+                # den bestehenden Anhang. Vorhandenen pdf-Pfad erhalten:
+                "pdf": _vorhandenes_pdf(d.get("id", "")),
+            })
+            self._json({"ok": True, "aktiv": data["aktiv"], "profile": data["profile"]})
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_profile_aktiv(self):
+        """POST /api/admin/profile/aktiv — aktives Angebot umschalten. Body: {id}."""
+        d = self._lese_json_body()
+        pid = str(d.get("id", "")).strip()
+        if not pid:
+            self._json({"ok": False, "meldung": "id fehlt."})
+            return
+        try:
+            data = profil_store.aktiv_setzen(pid)
+            # Sofort auf die geteilte Bridge anwenden (nächster Lauf nutzt es ohnehin)
+            self._profil_aktiv_anwenden()
+            self._json({"ok": True, "aktiv": data["aktiv"], "profile": data["profile"]})
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_profile_loeschen(self):
+        """POST /api/admin/profile/loeschen — Profil entfernen. Body: {id}."""
+        d = self._lese_json_body()
+        pid = str(d.get("id", "")).strip()
+        if not pid:
+            self._json({"ok": False, "meldung": "id fehlt."})
+            return
+        try:
+            data = profil_store.profil_loeschen(pid)
+            self._json({"ok": True, "aktiv": data["aktiv"], "profile": data["profile"]})
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _handle_profile_pdf(self):
+        """POST /api/admin/profile/pdf?id=<profil_id> — PDF-Anhang hochladen.
+
+        Roher PDF-Body (application/pdf). Speichert unter product/data/
+        _profile_assets/<id>.pdf und trägt den Pfad ins Profil ein.
+        """
+        from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
+        qs = _parse_qs(_urlparse(self.path).query)
+        pid = (qs.get("id", [""])[0]).strip()
+        if not pid:
+            self._json({"ok": False, "meldung": "id (Query-Parameter) fehlt."})
+            return
+        try:
+            laenge = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            laenge = 0
+        if laenge <= 0:
+            self._json({"ok": False, "meldung": "Leerer Upload."})
+            return
+        if laenge > 8 * 1024 * 1024:
+            self._json({"ok": False, "meldung": "PDF zu groß (max. 8 MB)."})
+            return
+        daten = self.rfile.read(laenge)
+        if not daten.startswith(b"%PDF"):
+            self._json({"ok": False, "meldung": "Datei ist kein PDF."})
+            return
+        try:
+            pfad = profil_store.pdf_speichern(pid, daten)
+            # PDF-Pfad ins (bestehende) Profil eintragen
+            data = profil_store.laden()
+            ziel = next((p for p in data["profile"] if p["id"] == profil_store._slug(pid)), None)
+            if ziel is None:
+                self._json({"ok": False, "meldung": "Profil nicht gefunden — erst speichern."})
+                return
+            ziel["pdf"] = pfad
+            data = profil_store.speichern(data)
+            self._json({"ok": True, "pdf": pfad, "aktiv": data["aktiv"], "profile": data["profile"]})
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "meldung": str(e)})
+
     def _json(self, daten: dict | list):
         body = json.dumps(daten, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(200)
@@ -970,6 +1297,12 @@ def main():
     try:
         _bridge = EngineBridge(engine_dir)
         _reporter = Reporter(engine_dir)
+        # Aktives Angebot-Profil (Mailtext/Betreff/PDF) initial auf die Bridge.
+        try:
+            _bridge.profil_setzen(profil_store.aktives_profil_env())
+            print(f"[ui] Aktives Angebot: {profil_store.aktives_profil()['name']}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[ui] Angebot-Profil nicht geladen: {e}")
         print(f"[ui] Engine: {engine_dir}")
     except EngineError as e:
         print(f"[ui] WARNUNG: {e}")
