@@ -277,6 +277,49 @@ def test_fit_mit_stadt_unveraendert():
     assert score == 0.6, score
 
 
+# ─── Volumen-Hebel: mehr Portale + parallele Preview-Auflösung ───────────────
+
+def test_de_portale_erweitert():
+    de = sd._PORTAL_TEMPLATES_BY_LAND["de"]
+    blob = " ".join(de).lower()
+    for dom in ("stepstone", "indeed", "yourfirm", "meinestadt", "jobware", "monster"):
+        assert dom in blob, dom
+    # Xing/LinkedIn werden vom Resolver hart übersprungen → dürfen NICHT rein.
+    assert "xing" not in blob and "linkedin" not in blob
+
+
+def test_resolve_candidates_paart_korrekt_und_parallel():
+    cands = [{"url": f"u{i}", "title": f"t{i}"} for i in range(6)]
+
+    def fake(c):
+        return {"company_name_valid": True,
+                "company_name_extracted": c["url"].upper(),
+                "original_title": c["title"]}
+
+    pairs = sd._resolve_candidates(cands, fake, max_workers=4, wall_budget_s=10)
+    assert len(pairs) == 6
+    # Jedes Paar bleibt korrekt zugeordnet (Kandidat ↔ sein Resolved).
+    for cand, res in pairs:
+        assert res["company_name_extracted"] == cand["url"].upper()
+
+
+def test_resolve_candidates_schluckt_fehler():
+    cands = [{"url": "ok"}, {"url": "boom"}]
+
+    def fake(c):
+        if c["url"] == "boom":
+            raise RuntimeError("netzfehler")
+        return {"company_name_valid": True, "company_name_extracted": "OK"}
+
+    pairs = sd._resolve_candidates(cands, fake, max_workers=2, wall_budget_s=10)
+    # Fehler-Kandidat fällt raus, der gute bleibt — Lauf lebt weiter.
+    assert len(pairs) == 1 and pairs[0][1]["company_name_extracted"] == "OK"
+
+
+def test_resolve_candidates_leer():
+    assert sd._resolve_candidates([], lambda c: c, max_workers=4, wall_budget_s=5) == []
+
+
 # ─── Suchen-Speicher: Provenance + Löschen (ganze Suche / einzeln) + Edit ────
 
 def test_store_append_list_und_label():

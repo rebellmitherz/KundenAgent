@@ -294,6 +294,16 @@ _PORTAL_TEMPLATES_BY_LAND: dict[str, list[str]] = {
         'site:stepstone.de/stellenangebote-- {base} "{kw}"',
         'site:de.indeed.com/viewjob {base} "{kw}"',
         'site:indeed.com/viewjob {base} "{kw}"',
+        # Breiteres Portal-Set (Volumen-Hebel). Alle tragen Job-Detail-Marker in
+        # der URL (job/stellenangebot/…) → der Engine-Classifier erkennt sie ohne
+        # b2bbot-Eingriff. Der Preview-Resolver zieht den ARBEITGEBER aus dem
+        # JobPosting-JSON-LD, nicht den Portalnamen — die ATS-Namensfilter greifen
+        # nur, falls die Extraktion fehlschlägt. KEIN Xing/LinkedIn: der Resolver
+        # überspringt diese Domains hart (_SKIP_DOMAINS) → wären wirkungslos.
+        'site:yourfirm.de {base} "{kw}"',
+        'site:jobs.meinestadt.de {base} "{kw}"',
+        'site:jobware.de {base} "{kw}"',
+        'site:monster.de {base} "{kw}"',
     ],
     "at": [
         'site:stepstone.at {base} "{kw}"',
@@ -433,6 +443,60 @@ def _aus_cache_laden(report_path: Path, industry: str, city: str, signal_type: s
     return out
 
 
+# Parallelisierung der Preview-Auflösung. Jeder Kandidat = 1 HTTP-Fetch (8s-Socket-
+# Timeout im Resolver). Sequenziell skaliert das nicht: 50+ Kandidaten × bis 8s =
+# Minuten / Hänger — der reale Grund, warum große Suchen vorher nicht durchliefen.
+# Env-tunebar (analog ENRICH_SCRAPE_WALL_S der enrich-Schicht).
+def _preview_workers() -> int:
+    try:
+        return max(1, min(int(os.environ.get("SIGNAL_PREVIEW_WORKERS", "10") or "10"), 24))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _preview_wall_s() -> float:
+    try:
+        return max(5.0, float(os.environ.get("SIGNAL_PREVIEW_WALL_S", "120") or "120"))
+    except (TypeError, ValueError):
+        return 120.0
+
+
+# Obergrenze für die Zahl gefetchter Kandidaten — schützt vor Thread-/Bandbreiten-
+# Explosion, unabhängig von max_companies. Genug Puffer zum Filtern.
+_CANDIDATE_FETCH_CAP = 60
+
+
+def _resolve_candidates(candidates: list[dict], resolver, *, max_workers: int = 10,
+                        wall_budget_s: float = 120.0) -> list[tuple[dict, dict]]:
+    """Löst Job-Detail-Previews PARALLEL auf und gibt (kandidat, resolved)-Paare
+    zurück — in Eingabereihenfolge, nur die innerhalb des Budgets fertig gewordenen.
+
+    `resolver` ist injizierbar (Engine-`resolve_portal_job_detail_preview` im Live-
+    Pfad, ein Fake im Test) → die Parallel-Logik ist ohne Netz testbar. Fehler je
+    Kandidat werden geschluckt (der eine Lead fällt raus, der Lauf lebt weiter);
+    was bis zum Wall-Clock-Budget nicht fertig ist, wird verworfen statt zu hängen.
+    """
+    import concurrent.futures as _cf
+
+    if not candidates:
+        return []
+    results: list[Optional[dict]] = [None] * len(candidates)
+    workers = max(1, min(max_workers, len(candidates)))
+    with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        fut_to_idx = {ex.submit(resolver, c): i for i, c in enumerate(candidates)}
+        try:
+            for fut in _cf.as_completed(fut_to_idx, timeout=max(1.0, wall_budget_s)):
+                idx = fut_to_idx[fut]
+                try:
+                    results[idx] = fut.result()
+                except Exception:
+                    results[idx] = None
+        except _cf.TimeoutError:
+            # Budget erreicht — was fertig ist, nehmen wir; Rest bleibt None.
+            pass
+    return [(candidates[i], r) for i, r in enumerate(results) if r is not None]
+
+
 def discover_companies(
     engine_dir: str | Path,
     industry: str,
@@ -442,8 +506,8 @@ def discover_companies(
     max_companies: int = 10,
     provider: str = "serper",
     cached_report: Optional[str | Path] = None,
-    max_queries: int = 6,
-    max_results_per_query: int = 4,
+    max_queries: int = 10,
+    max_results_per_query: int = 5,
     laender=("de",),
 ) -> list[SignalFirma]:
     """Findet Firmen anhand eines Kaufsignals (broad-Modus).
@@ -503,11 +567,16 @@ def discover_companies(
                 by_url[url] = item
 
         unique = sorted(by_url.values(), key=lambda x: float(x.get("relevance_score") or 0), reverse=True)
-        unique = unique[: max(max_companies * 2, 8)]
+        unique = unique[: min(max(max_companies * 2, 8), _CANDIDATE_FETCH_CAP)]
 
+        # Previews PARALLEL auflösen (bounded Worker + Wall-Clock-Budget) statt
+        # sequenziell — sonst reißt schon ein Dutzend toter Seiten die Suche in
+        # einen mehrminütigen Hänger.
         firmen: list[SignalFirma] = []
-        for cand in unique:
-            resolved = resolve_portal_job_detail_preview(cand)
+        for cand, resolved in _resolve_candidates(
+            unique, resolve_portal_job_detail_preview,
+            max_workers=_preview_workers(), wall_budget_s=_preview_wall_s(),
+        ):
             name = str(resolved.get("company_name_extracted") or "").strip()
             if not resolved.get("company_name_valid") or not name:
                 continue
@@ -583,12 +652,15 @@ def discover_with_websites(
     provider: str = "serper",
     cached_report: Optional[str | Path] = None,
     laender=("de",),
+    max_queries: int = 10,
+    max_results_per_query: int = 5,
 ) -> list[SignalFirma]:
     """Discovery + Website-Auflösung in einem Schritt."""
     firmen = discover_companies(
         engine_dir, industry, city, signal_type,
         max_companies=max_companies, provider=provider, cached_report=cached_report,
         laender=laender,
+        max_queries=max_queries, max_results_per_query=max_results_per_query,
     )
     for f in firmen:
         url, conf = resolve_website(engine_dir, f.firma, city, provider=provider)

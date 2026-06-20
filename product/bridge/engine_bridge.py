@@ -9,6 +9,7 @@ Muster: analog telegram_seller/engine.py (Subprozess auf mine.py).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -278,15 +279,28 @@ class EngineBridge:
         self._pruefen(auftrag, ErlaubteAktion.SUCHEN_AUFBEREITEN)
         auftrag.starten()
 
+        # Discovery-Breite an die Zielmenge koppeln (gedeckelt). Der frühere feste
+        # 6er-Query-Cap war der Hauptgrund, warum eine Suche real nur ~5–12 Leads
+        # brachte — egal wie viele bestellt waren. Jede Query = 1 SERPER-Call (Cent-
+        # Bereich); die Preview-Auflösung läuft jetzt parallel mit Budget, darum ist
+        # mehr Breite gefahrlos. Für 50 Leads braucht es deutlich mehr Roh-Treffer.
+        try:
+            ziel = max(int(auftrag.lead_anzahl), 1)
+        except (TypeError, ValueError):
+            ziel = 10
+        disc_queries = min(max(ziel + 4, 10), 30)
+
         try:
             firmen = _sd.discover_with_websites(
                 self.engine_dir,
                 industry=auftrag.zielgruppe,
                 city=auftrag.region,
                 signal_type=signal_typ,
-                max_companies=max(int(auftrag.lead_anzahl), 1),
+                max_companies=ziel,
                 cached_report=cached_report,
                 laender=laender,
+                max_queries=disc_queries,
+                max_results_per_query=5,
             )
         except Exception as exc:  # noqa: BLE001
             kurz = f"Signal-Discovery fehlgeschlagen: {exc}"
@@ -312,9 +326,13 @@ class EngineBridge:
                 mit_website, tmp_path,
                 industry=auftrag.zielgruppe, city=auftrag.region,
             )
+            # Breite Signale (z.B. sales_hiring) finden viele Firmen → viele
+            # Websites zum Scrapen. 10 Min reichten dafür nicht (Abbruch mitten
+            # im Lauf, alles verworfen). 20 Min Puffer, damit breite Suchen
+            # sauber durchlaufen statt zu sterben.
             rc, ausgabe = self._run(
                 ["--input-csv", tmp_path, "--mode", "enrich"],
-                timeout=600,
+                timeout=1200,
             )
         finally:
             try:
@@ -332,6 +350,21 @@ class EngineBridge:
         # Kontakt-Anreicherung (Weg-2-Tiefe): Telefon aus bereits gescraptem Text
         # + persönlicher Mail-Vorschlag. Defensiv, kein Auto-Send, kein Live-Lookup.
         self._signal_kontakt_anreichern(leads)
+        # Kontakt-Pflicht (Emilio): Ein Lead ohne JEDE Kontaktmöglichkeit (weder
+        # E-Mail NOCH Telefon) ist für Outreach wertlos → vor Personalisierung und
+        # Schreiben aussortieren, damit er gar nicht erst auftaucht.
+        def _hat_kontakt(l: dict) -> bool:
+            email = (l.get("email") or l.get("contact_email") or "").strip()
+            phone = (l.get("phone") or l.get("phone_clean") or l.get("contact_phone") or "").strip()
+            return bool(email or phone)
+        _vorher = len(leads)
+        leads = [l for l in leads if _hat_kontakt(l)]
+        if len(leads) < _vorher:
+            print(f"[signal] {_vorher - len(leads)} Leads ohne E-Mail/Telefon verworfen "
+                  f"({len(leads)} mit Kontakt bleiben).", flush=True)
+        # Kaufbereitschafts-Analyse (1k-Produkt): je Lead Score + Stufe + Gründe +
+        # Beleg aus den vorhandenen Feldern verdichten (deterministisch, kein Netz).
+        self._signal_readiness_bewerten(leads)
         # Verkaufspsychologische Personalisierung — NUR hier (Signal-Suche):
         # je Lead einen Aufhänger ans Lead-Feld heften + Vorschau-Mail rendern.
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
@@ -402,6 +435,15 @@ class EngineBridge:
             serper_key = os.environ.get("SERPER_API_KEY", "").strip()
             sucher = _ce.make_serper_telefon_sucher(serper_key) if serper_key else None
             _ce.anreichern(leads, telefon_sucher=sucher)
+        except Exception:
+            pass
+
+    def _signal_readiness_bewerten(self, leads: list[dict]) -> None:
+        """Heftet je Signal-Lead die Kaufbereitschafts-Analyse an (Score/Stufe/
+        Gründe/Beleg). Defensiv: ein Fehler darf die Suche nie kippen."""
+        try:
+            from product.bridge import signal_readiness as _r
+            _r.anreichern(leads)
         except Exception:
             pass
 
@@ -544,6 +586,10 @@ class EngineBridge:
             "signal_titel": l.get("signal_titel", ""),
             "signal_quelle_url": l.get("signal_quelle_url", ""),
             "aufhaenger": l.get("aufhaenger", ""),
+            "kaufbereitschaft_score": l.get("kaufbereitschaft_score", 0),
+            "kaufbereitschaft_stufe": l.get("kaufbereitschaft_stufe", ""),
+            "kaufbereitschaft_gruende": l.get("kaufbereitschaft_gruende", []),
+            "kaufbereitschaft_beleg_url": l.get("kaufbereitschaft_beleg_url", "") or l.get("signal_quelle_url", ""),
             "notiz": l.get("notiz", ""),
             "mail_betreff": (l.get("personalisierte_mail") or {}).get("betreff", ""),
             "mail_body": (l.get("personalisierte_mail") or {}).get("body", ""),
@@ -865,6 +911,7 @@ class EngineBridge:
                 "termin_grund": it.get("appointment_reason", ""),
                 "kategorie":    it.get("reply_sales_category", ""),
                 "entry_key":    ek,
+                "id":           self._antwort_id(it),
                 # Kontext: auf welche Mail wurde geantwortet, aus welchem Postfach
                 "von":          it.get("from_email", ""),
                 "postfach":     it.get("received_account", ""),
@@ -874,6 +921,37 @@ class EngineBridge:
             if len(out) >= limit:
                 break
         return out
+
+    @staticmethod
+    def _antwort_id(item: dict) -> str:
+        """Stabile, HTML-sichere ID je Antwort (für gezieltes Löschen)."""
+        basis = str(item.get("message_id") or "") or "|".join(
+            str(item.get(k, "")) for k in ("entry_key", "from_email", "inbound_subject", "sent_at"))
+        return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+
+    def antwort_loeschen(self, reply_id: str) -> int:
+        """Entfernt eine eingegangene Antwort aus reply_queue.json (rein lokal,
+        kein IMAP-Eingriff, kein Versand). Gibt die Anzahl entfernter Einträge
+        zurück; idempotent (unbekannte ID → 0)."""
+        reply_id = (reply_id or "").strip()
+        if not reply_id:
+            return 0
+        pfad = self._reply_queue_pfad()
+        if not pfad.exists():
+            return 0
+        try:
+            data = json.loads(pfad.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+        if not isinstance(data, dict):
+            return 0
+        items = data.get("items", [])
+        rest = [it for it in items if self._antwort_id(it) != reply_id]
+        entfernt = len(items) - len(rest)
+        if entfernt:
+            data["items"] = rest
+            pfad.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return entfernt
 
     @staticmethod
     def _domain(email: str) -> str:
