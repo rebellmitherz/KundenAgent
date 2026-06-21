@@ -68,6 +68,55 @@ def _name_tokens(name: str) -> list[str]:
     return [t for t in re.split(r"[^a-zA-ZäöüÄÖÜß]+", (name or "").lower()) if len(t) >= 2]
 
 
+# ─── Müll-Namen-Filter ──────────────────────────────────────────────────────
+# Der Scraper greift manchmal Tech-Erwähnungen oder Rechtstexte als Personenname
+# ab (z. B. "Adobe Fonts", "Google Inc"). Diese werden vor der Anreicherung
+# geleert — lieber kein Name als ein falscher.
+
+_MULL_NAME_EXAKT = frozenset({
+    "adobe fonts", "google inc", "google llc", "google analytics",
+    "google maps", "google tag manager", "microsoft corporation",
+    "microsoft corp", "cloudflare inc", "cloudflare", "jquery foundation",
+    "font awesome", "bootstrap", "wordpress", "webmaster",
+    "administrator", "redaktion",
+})
+
+_MULL_NAME_TOKENS = frozenset({
+    "adobe", "google", "microsoft", "cloudflare", "jquery",
+    "wordpress", "github", "instagram", "facebook", "analytics",
+    "fonts", "copyright",
+})
+
+_MULL_DIGIT_RE = re.compile(r"\d")
+_MULL_RECHT_RE = re.compile(r"[§©®™]|gmbh\s*&|e\.?\s*v\.?\b", re.I)
+
+
+def _ist_mull_name(name: str) -> bool:
+    """True wenn `name` offensichtlich kein Personenname ist.
+
+    Konservativ: lieber einen echten Namen behalten als fälschlich entfernen.
+    Prüft: bekannte Tech-/Firmennamen, Rechtstextfragmente, Ziffern, Überlänge.
+    """
+    if not name:
+        return False
+    n = name.strip()
+    if not n:
+        return False
+    nl = n.lower()
+    if nl in _MULL_NAME_EXAKT:
+        return True
+    if len(n) > 50:        # echte GF-Namen sind kürzer
+        return True
+    if _MULL_DIGIT_RE.search(n):
+        return True
+    if _MULL_RECHT_RE.search(n):
+        return True
+    if set(nl.split()) & _MULL_NAME_TOKENS:
+        return True
+    return False
+
+
+# ─── Rollen-/Sammel-Postfächer ──────────────────────────────────────────────
 # Rollen-/Sammel-Postfächer — NIE als „persönlicher" Vorschlag (das wäre Fake-
 # Personalisierung) und der Trigger dafür, dass eine Mail als generisch gilt.
 _ROLE_LOCALS = {
@@ -118,6 +167,15 @@ def _ist_generisch(email: str) -> bool:
 
 
 def _ein_lead(lead: dict, stats: dict, telefon_sucher) -> None:
+    # 0) Müll-Namen bereinigen: Scraper greift manchmal Tech-Markennamen oder
+    #    Rechtstexte als GF-Namen (z. B. "Adobe Fonts", "Google Inc"). Leer ist
+    #    besser als falsch — die Mail-Vorschlag-Logik läuft dann einfach leer.
+    for feld in ("managing_director", "contact_person", "contact_full_name"):
+        val = (lead.get(feld) or "").strip()
+        if val and _ist_mull_name(val):
+            lead[feld] = ""
+            stats["mull_namen_bereinigt"] += 1
+
     # 1) Telefon — nur wenn keins da. Erst aus bereits gescraptem Text (gratis),
     #    dann optional live (nur wenn ein Sucher injiziert wurde).
     hat_phone = bool((lead.get("phone") or lead.get("phone_clean") or "").strip())
@@ -193,7 +251,7 @@ def anreichern(leads: list[dict], *, telefon_sucher=None) -> dict:
     ``telefon_sucher``: optionaler Callable ``lead -> text`` für eine echte
     Live-Telefonsuche. Default ``None`` = nur gratis Text-Parse (kein Limit-Verbrauch).
     """
-    stats = {"telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0}
+    stats = {"telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0, "mull_namen_bereinigt": 0}
     for lead in leads or []:
         try:
             _ein_lead(lead, stats, telefon_sucher)

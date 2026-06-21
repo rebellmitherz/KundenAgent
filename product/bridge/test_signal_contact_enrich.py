@@ -126,6 +126,64 @@ def test_anreichern_defensiv_kein_crash():
     assert isinstance(stats, dict)
 
 
+# ─── _ist_mull_name: Müll-Namen-Erkennung ────────────────────────────────────
+
+def test_mull_name_adobe_fonts():
+    assert ce._ist_mull_name("Adobe Fonts") is True
+
+
+def test_mull_name_google_inc():
+    assert ce._ist_mull_name("Google Inc") is True
+
+
+def test_mull_name_cloudflare():
+    assert ce._ist_mull_name("Cloudflare Inc") is True
+
+
+def test_mull_name_rechtstext_zu_lang():
+    assert ce._ist_mull_name("ABSCHNITT 5 DER DATENSCHUTZVERORDNUNG ERKLAERUNG") is True
+
+
+def test_mull_name_mit_ziffer():
+    assert ce._ist_mull_name("Max Muster123") is True
+
+
+def test_mull_name_leer():
+    assert ce._ist_mull_name("") is False
+    assert ce._ist_mull_name(None) is False
+
+
+def test_mull_name_echter_name_bleibt():
+    for name in ("Jens Thiele", "Angela Bisping", "Gerhard Lütje", "Markus Ettlin",
+                 "Jörg Jacobi", "Gerald Holler"):
+        assert ce._ist_mull_name(name) is False, f"falscher Treffer: {name}"
+
+
+# ─── anreichern: Müll-Namen werden bereinigt ────────────────────────────────
+
+def test_anreichern_bereinigt_mull_namen():
+    lead = {
+        "phone": "", "email": "info@kisico.de",
+        "managing_director": "Adobe Fonts",
+        "contact_person": "Google Inc",
+    }
+    stats = ce.anreichern([lead])
+    assert lead["managing_director"] == ""
+    assert lead["contact_person"] == ""
+    assert stats.get("mull_namen_bereinigt", 0) >= 2
+
+
+def test_anreichern_behaelt_echte_namen():
+    lead = {
+        "phone": "", "email": "info@firma.de",
+        "managing_director": "Jens Thiele",
+        "contact_full_name": "Angela Bisping",
+    }
+    ce.anreichern([lead])
+    assert lead["managing_director"] == "Jens Thiele"
+    assert lead["contact_full_name"] == "Angela Bisping"
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     ok = 0

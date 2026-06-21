@@ -350,10 +350,14 @@ def _portal_templates_fuer(laender) -> list[str]:
 
 # Such-Keywords für sales/growth, wenn der Engine-Builder nicht greift (z. B.
 # ohne Stadt oder außerhalb DE) — damit alle Signaltypen länderweit funktionieren.
+# WICHTIG: Deutsche Begriffe ZUERST — die äußere Schleife iteriert Keywords, die
+# innere Templates. max_queries schneidet ab; die ersten Keywords bestimmen was
+# bei Serper landet. Englische Titel ergänzen, aber niemals zuerst.
 _SALES_GROWTH_KEYWORDS: dict[str, list[str]] = {
     "sales_hiring": [
-        "Vertriebsmitarbeiter", "Sales Manager", "Account Executive",
-        "Vertrieb", "Sales",
+        "Vertriebsmitarbeiter", "Vertrieb", "Außendienst",
+        "Neukundengewinnung", "Vertriebsbeauftragter",
+        "Sales Manager", "Account Executive",
     ],
     "growth_expansion": [
         "Wir stellen ein", "Team-Ausbau", "neue Stellen", "Wir wachsen",
@@ -364,16 +368,19 @@ _SALES_GROWTH_KEYWORDS: dict[str, list[str]] = {
 # Such-Keywords je NEUEM Signaltyp (treiben die Discovery-Queries).
 _SIGNAL_KEYWORDS: dict[str, list[str]] = {
     "appointment_setter": [
-        "Sales Development Representative", "SDR", "Telefonakquise",
-        "Terminierung", "Inside Sales", "Telesales",
+        "Terminierung", "Telefonakquise", "Kaltakquise",
+        "Terminakquise", "Outbound-Vertrieb",
+        "Sales Development Representative", "SDR", "Inside Sales", "Telesales",
     ],
     "marketing_hiring": [
-        "Performance Marketing Manager", "Online Marketing Manager",
+        "Online-Marketing-Manager", "Performance Marketing", "Leadgenerierung",
+        "Marketingleiter", "Marketingmanager",
         "Growth Marketing", "Lead Generation", "Demand Generation",
     ],
     "leadership_hiring": [
-        "Head of Sales", "Vertriebsleiter", "Sales Director",
-        "Leiter Vertrieb", "Geschäftsführer Vertrieb",
+        "Vertriebsleiter", "Leiter Vertrieb", "Vertriebsleitung",
+        "Geschäftsführer Vertrieb",
+        "Head of Sales", "Sales Director",
     ],
     "new_location": [
         "neuer Standort", "neue Niederlassung", "Niederlassung eröffnet",
