@@ -106,7 +106,8 @@ class AgentRunner:
         return auftrag.auftrags_id
 
     def signal_suche_im_hintergrund(
-        self, auftrag: Auftrag, signal_typ: str = "sales_hiring", laender=("de",)
+        self, auftrag: Auftrag, signal_typ="sales_hiring", laender=("de",),
+        *, linkedin_web: bool = False, linkedin_pro: bool = False,
     ) -> str:
         """Startet eine Signal-Suche (High-Intent-Targeting) asynchron.
 
@@ -114,20 +115,33 @@ class AgentRunner:
         ``suchen_per_signal`` direkt im Daemon-Thread auf und schreibt den Stand
         (laeuft|fertig|fehler) für die UI. KEIN Versand. Der bestehende
         Brain-/Kampagnen-Pfad bleibt unberührt.
+
+        ``signal_typ`` darf ein einzelner String ODER eine Liste sein (Stapelung).
         """
         if self._bridge is None:
             raise RuntimeError("Keine Bridge verbunden.")
         if auftrag.status == AuftragsStatus.ENTWURF:
             auftrag.bestaetigen()
+        # Lesbares Label — bei Stapelung alle Signal-Labels, sonst das eine.
+        typen = [signal_typ] if isinstance(signal_typ, str) else list(signal_typ or [])
+        labels = ", ".join(self._bridge._SIGNAL_LABELS.get(t, t) for t in typen) or "Signal"
+        quellen = []
+        if linkedin_web:
+            quellen.append("+LinkedIn-Web")
+        if linkedin_pro:
+            quellen.append("+LinkedIn-Pro")
+        quellen_txt = (" " + " ".join(quellen)) if quellen else ""
         self._bridge.signal_status_schreiben(
             "laeuft",
             f"Signal-Suche läuft: {auftrag.zielgruppe} · {auftrag.region} "
-            f"({self._bridge._SIGNAL_LABELS.get(signal_typ, signal_typ)})…",
+            f"({labels}{quellen_txt})…",
         )
 
         def _arbeit() -> None:
             try:
-                res = self._bridge.suchen_per_signal(auftrag, signal_typ=signal_typ, laender=laender)
+                res = self._bridge.suchen_per_signal(
+                    auftrag, signal_typ=signal_typ, laender=laender,
+                    linkedin_web=linkedin_web, linkedin_pro=linkedin_pro)
                 if res.ok:
                     self._bridge.signal_status_schreiben(
                         "fertig", res.meldung,
@@ -256,6 +270,12 @@ class AgentRunner:
         for a in roh:
             a["erledigt"] = a.get("entry_key", "") in erledigte
         return roh
+
+    def antwort_loeschen(self, reply_id: str) -> int:
+        """Löscht eine eingegangene Antwort aus der Queue (lokal, kein Versand)."""
+        if self._bridge is None:
+            return 0
+        return self._bridge.antwort_loeschen(reply_id)
 
     def antworten_abrufen(self, limit: int = 30) -> dict:
         """E: Holt aktiv neue Antworten aus dem Postfach (read-only, kein Versand).

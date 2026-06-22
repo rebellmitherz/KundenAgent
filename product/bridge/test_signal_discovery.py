@@ -282,10 +282,89 @@ def test_fit_mit_stadt_unveraendert():
 def test_de_portale_erweitert():
     de = sd._PORTAL_TEMPLATES_BY_LAND["de"]
     blob = " ".join(de).lower()
-    for dom in ("stepstone", "indeed", "yourfirm", "meinestadt", "jobware", "monster"):
+    for dom in ("stepstone", "indeed", "yourfirm", "meinestadt", "jobware", "monster",
+                "stellenanzeigen", "kimeta", "jobvector"):
         assert dom in blob, dom
     # Xing/LinkedIn werden vom Resolver hart übersprungen → dürfen NICHT rein.
     assert "xing" not in blob and "linkedin" not in blob
+
+
+# ─── Signal-Stapelung ────────────────────────────────────────────────────────
+
+def test_firmen_vereinen_union_nicht_schnitt():
+    a1 = sd.SignalFirma(firma="Alpha GmbH", signal_titel="Vertrieb", fit_score=0.6,
+                        fit_status="target_fit", signal_typ="sales_hiring")
+    a2 = sd.SignalFirma(firma="alpha gmbh", signal_titel="SDR", fit_score=0.9,
+                        fit_status="target_fit", signal_typ="appointment_setter", signal_alter_tage=5)
+    b = sd.SignalFirma(firma="Beta GmbH", signal_titel="Außendienst", fit_score=0.7,
+                       fit_status="target_fit", signal_typ="sales_hiring")
+    out = sd._firmen_vereinen([("sales_hiring", [a1, b]), ("appointment_setter", [a2])])
+    # Union: 2 Firmen (NICHT Schnittmenge=1)
+    assert len(out) == 2
+    # Mehrfach-Signal-Firma ganz oben, stärkster Treffer = Primär
+    assert out[0].firma == "Alpha GmbH" and out[0].signal_count == 2
+    assert out[0].signal_typ == "appointment_setter"     # höherer Fit gewinnt
+    assert out[0].signal_alter_tage == 5
+    assert out[0].signale == ["appointment_setter", "sales_hiring"]
+    assert len(out[0].signal_belege) == 2
+    assert out[1].firma == "Beta GmbH" and out[1].signal_count == 1
+
+
+def test_discover_multi_signal_einzel_ist_alter_pfad(monkeypatch=None):
+    # Bei genau einem Signal darf kein Stapelungs-Overhead entstehen.
+    calls = {"single": 0, "multi": 0}
+    orig = sd.discover_with_websites
+    sd.discover_with_websites = lambda *a, **k: (calls.__setitem__("single", calls["single"]+1) or [])
+    try:
+        sd.discover_multi_signal("b2bbot", "Handel", "", ["sales_hiring"], max_companies=5)
+    finally:
+        sd.discover_with_websites = orig
+    assert calls["single"] == 1
+
+
+def test_discover_multi_signal_cache_stapelt():
+    rep = {"results": [
+        {"company_name": "Alpha Vertrieb GmbH", "company_name_valid": True,
+         "title": "Sales Manager (m/w/d)", "url": "https://stepstone.de/j1", "date": "vor 3 Tagen"},
+        {"company_name": "Beta Solutions GmbH", "company_name_valid": True,
+         "title": "SDR Outbound Terminierung", "url": "https://stepstone.de/j2"},
+    ]}
+    import os
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)   # Windows: offenen fd schließen, sonst sperrt unlink (WinError 32)
+    Path(path).write_text(json.dumps(rep), encoding="utf-8")
+    orig = sd.resolve_website
+    sd.resolve_website = lambda *a, **k: ("https://example.de", 0.9)
+    try:
+        firmen = sd.discover_multi_signal(
+            "b2bbot", "Handel", "", ["sales_hiring", "appointment_setter"],
+            max_companies=10, cached_report=path)
+    finally:
+        sd.resolve_website = orig
+        Path(path).unlink()
+    by = {f.firma: f for f in firmen}
+    # Union = beide Firmen. Nur die SDR-Firma matcht beide Signale → count=2.
+    assert len(firmen) == 2
+    assert by["Beta Solutions GmbH"].signal_count == 2
+    assert by["Alpha Vertrieb GmbH"].signal_count == 1
+    assert firmen[0].firma == "Beta Solutions GmbH"     # Heißgrad oben
+    assert by["Alpha Vertrieb GmbH"].signal_alter_tage == 3   # Frische geparst
+
+
+# ─── LinkedIn-Quellen ────────────────────────────────────────────────────────
+
+def test_linkedin_company_from_title():
+    f = sd._linkedin_company_from_title
+    assert f("Müller Vertrieb GmbH hiring Sales Manager in Berlin | LinkedIn") == "Müller Vertrieb GmbH"
+    assert f("Acme GmbH sucht Vertriebsmitarbeiter (m/w/d) | LinkedIn") == "Acme GmbH"
+    assert f("Sales Development Representative at Beta AG | LinkedIn") == "Beta AG"
+    assert f("Vertriebsleiter bei Gamma Solutions - LinkedIn") == "Gamma Solutions"
+    assert f("Titel ganz ohne erkennbares Muster") == ""
+
+
+def test_apify_pro_ohne_key_ist_leer_und_kostenlos():
+    # Ohne APIFY_API_KEY darf NIE ein Call passieren → leere Liste, 0 €.
+    assert sd._apify_pro_firmen("Vertrieb", "Berlin", "sales_hiring", api_key="") == []
 
 
 def test_resolve_candidates_paart_korrekt_und_parallel():

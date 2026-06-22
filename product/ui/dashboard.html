@@ -714,6 +714,14 @@ html, body {
 }
 .antwort-close-btn:hover { opacity: 0.8; }
 .antwort-close-btn:disabled { opacity: 0.4; cursor: default; }
+.antwort-del-btn {
+  margin-top: 12px; margin-left: 8px; padding: 8px 14px; background: transparent;
+  border: 1px solid rgba(255,90,90,0.4); border-radius: var(--radius-sm);
+  color: #ff8a8a; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s;
+}
+.antwort-del-btn:hover { opacity: 0.8; }
+.antwort-del-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* ─── Funnel / Kampagne ──────────────────────────────────────────────── */
 .funnel-wrap { background: var(--card); border: 1px solid var(--border);
@@ -922,6 +930,24 @@ html, body {
 
 .setup-input:focus { border-color: var(--cyan); }
 .setup-input::placeholder { color: var(--text3); }
+
+/* Signal-Stapelung: Mehrfach-Auswahl per Checkbox */
+.sig-multi { display: flex; flex-direction: column; gap: 7px; }
+.sig-chk {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--card2); border: 1px solid var(--border2);
+  border-radius: var(--radius-sm); padding: 9px 13px;
+  font-size: 13px; color: var(--text1); cursor: pointer;
+  transition: border-color 0.15s, background 0.15s; text-transform: none; letter-spacing: 0;
+}
+.sig-chk:hover { border-color: var(--cyan); }
+.sig-chk input { accent-color: var(--cyan); width: 15px; height: 15px; cursor: pointer; }
+.sig-chk:has(input:checked) { border-color: var(--cyan); background: rgba(34,211,238,.07); }
+.sig-hot {
+  margin-left: auto; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: #fbbf24; background: rgba(251,191,36,.12);
+  border-radius: 4px; padding: 2px 7px;
+}
 
 .setup-input-hint {
   font-size: 11px;
@@ -1743,6 +1769,7 @@ function renderAntworten(d) {
         ${aufMail ? `<div class="antwort-meta">${aufMail}</div>` : ''}
         ${a.auszug ? `<div class="antwort-text">${esc(a.auszug)}</div>` : ''}
         ${termin ? `<button class="antwort-close-btn" onclick="terminAbschliessen('${esc(a.firma)}', this)">✅ Termin abschließen</button>` : ''}
+        <button class="antwort-del-btn" onclick="antwortLoeschen('${esc(a.id)}', this)" title="Diese Nachricht aus der Liste entfernen">🗑 Löschen</button>
       </div>`;
   }
   el.innerHTML = html;
@@ -1778,6 +1805,22 @@ async function antwortenAbrufen() {
     if (msg) msg.innerHTML = `<div class="freigabe-result err" style="display:block;margin:0 0 16px">Verbindungsfehler: ${esc(String(e))}</div>`;
   } finally {
     if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = '📥 Postfach jetzt abrufen'; }
+  }
+}
+
+async function antwortLoeschen(id, btn) {
+  if (!id) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳…'; }
+  try {
+    const r = await fetch('/api/agent/antwort-loeschen', {
+      method: 'POST', headers: _adminHeaders(),
+      body: JSON.stringify({ id }),
+    });
+    const d = await r.json();
+    if (d.ok) { ladenAntworten(); }
+    else if (btn) { btn.disabled = false; btn.textContent = '🗑 Löschen'; alert(d.meldung || 'Konnte nicht löschen'); }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🗑 Löschen'; }
   }
 }
 
@@ -1902,15 +1945,20 @@ function renderAuftragForm() {
           <div class="setup-hint" style="margin-top:6px">Stadt leer lassen = ganzes Land / DACH durchsuchen.</div>
         </div>
         <div class="setup-form-row" id="signalTypRow" style="display:none">
-          <label class="setup-label">Welches Kaufsignal?</label>
-          <select class="setup-input" id="auf_signal_typ">
-            <option value="sales_hiring">Stellt aktiv Vertrieb ein (heißeste Spur)</option>
-            <option value="growth_expansion">Wächst / baut Team aus</option>
-            <option value="appointment_setter">Sucht Terminierer / SDR (Outbound)</option>
-            <option value="marketing_hiring">Investiert in Marketing / Leadgen</option>
-            <option value="leadership_hiring">Holt Vertriebs-/Marketingleitung</option>
-            <option value="new_location">Eröffnet Standort / expandiert</option>
-          </select>
+          <label class="setup-label">Welche Kaufsignale? <span style="color:var(--text3);font-weight:400">(mehrere = Stapelung, Firmen mit mehreren Signalen werden 🔥 priorisiert)</span></label>
+          <div id="auf_signale" class="sig-multi">
+            <label class="sig-chk"><input type="checkbox" value="sales_hiring" checked> Stellt aktiv Vertrieb ein <span class="sig-hot">heißeste Spur</span></label>
+            <label class="sig-chk"><input type="checkbox" value="appointment_setter" checked> Sucht Terminierer / SDR (Outbound)</label>
+            <label class="sig-chk"><input type="checkbox" value="growth_expansion" checked> Wächst / baut Team aus</label>
+            <label class="sig-chk"><input type="checkbox" value="leadership_hiring"> Holt Vertriebs-/Marketingleitung</label>
+            <label class="sig-chk"><input type="checkbox" value="marketing_hiring"> Investiert in Marketing / Leadgen</label>
+            <label class="sig-chk"><input type="checkbox" value="new_location"> Eröffnet Standort / expandiert</label>
+          </div>
+          <label class="setup-label" style="margin-top:12px">Zusätzliche Quellen</label>
+          <div id="auf_quellen" class="sig-multi">
+            <label class="sig-chk"><input type="checkbox" id="auf_linkedin_web" value="1"> LinkedIn-Web <span style="color:var(--text3)">(gratis, experimentell)</span></label>
+            <label class="sig-chk"><input type="checkbox" id="auf_linkedin_pro" value="1"> LinkedIn-Pro <span style="color:var(--text3)">(Apify — nur mit API-Key, kostet)</span></label>
+          </div>
         </div>
         <div class="setup-form-row">
           <label class="setup-label">Lead-Anzahl (Ziel)</label>
@@ -2005,12 +2053,22 @@ async function signalSucheStarten() {
   btn.disabled = true; btn.textContent = '⏳ Startet…';
   const landWahl = (document.getElementById('auf_land') || {}).value || 'de';
   const laender = landWahl === 'dach' ? ['de','at','ch'] : [landWahl];
+  const signale = Array.from(
+    document.querySelectorAll('#auf_signale input[type=checkbox]:checked')
+  ).map(c => c.value);
+  if (_suchModus === 'signal' && signale.length === 0) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ Bitte mindestens ein Kaufsignal auswählen.</div>`;
+    btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
+    return;
+  }
   const body = {
     zielgruppe: document.getElementById('auf_zielgruppe').value.trim(),
     region:     document.getElementById('auf_region').value.trim(),
     anzahl:     parseInt(document.getElementById('auf_anzahl').value, 10) || 0,
     angebot:    document.getElementById('auf_angebot').value.trim(),
-    signal_typ: document.getElementById('auf_signal_typ').value,
+    signale:    signale,
+    linkedin_web: !!(document.getElementById('auf_linkedin_web') || {}).checked,
+    linkedin_pro: !!(document.getElementById('auf_linkedin_pro') || {}).checked,
     laender:    laender,
   };
   try {

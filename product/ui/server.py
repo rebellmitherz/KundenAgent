@@ -110,6 +110,7 @@ _ADMIN_ENDPUNKTE  = {"/api/vorschau", "/api/setup/status",
                      "/api/agent/signal-lead-loeschen", "/api/agent/signal-run-loeschen",
                      "/api/agent/signal-lead-aendern",
                      "/api/agent/termin-abschliessen", "/api/agent/antworten-abrufen",
+                     "/api/agent/antwort-loeschen",
                      "/api/closer/status", "/api/closer/log",
                      "/api/closer/events", "/api/closer/skript",
                      "/api/closer/starten", "/api/closer/stoppen",
@@ -344,6 +345,10 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._ist_admin():
                 self._403(); return
             self._handle_agent_antworten_abrufen()
+        elif self.path == "/api/agent/antwort-loeschen":
+            if not self._ist_admin():
+                self._403(); return
+            self._handle_agent_antwort_loeschen()
         elif self.path == "/api/setup/config":
             if not self._ist_admin():
                 self._403(); return
@@ -653,7 +658,16 @@ class _Handler(BaseHTTPRequestHandler):
         zielgruppe = str(d.get("zielgruppe", "")).strip()
         region = str(d.get("region", "")).strip()   # Stadt — jetzt OPTIONAL
         angebot = str(d.get("angebot", "")).strip()
-        signal_typ = str(d.get("signal_typ", "sales_hiring")).strip() or "sales_hiring"
+        # Signal-Stapelung: "signale" (Liste) bevorzugt, sonst "signal_typ" (String).
+        roh_sig = d.get("signale", d.get("signal_typ", "sales_hiring"))
+        if isinstance(roh_sig, str):
+            signale = [roh_sig.strip()] if roh_sig.strip() else []
+        else:
+            signale = [str(s).strip().lower() for s in (roh_sig or []) if str(s).strip()]
+        signale = list(dict.fromkeys(signale)) or ["sales_hiring"]
+        # LinkedIn-Quellen (Toggles). Pro nur wirksam mit APIFY_API_KEY (sonst 0 €).
+        linkedin_web = bool(d.get("linkedin_web", False))
+        linkedin_pro = bool(d.get("linkedin_pro", False))
         # Länder-Auswahl (DACH). Akzeptiert Liste ["de","at"] ODER String "dach"/"de".
         roh_land = d.get("laender", d.get("land", ["de"]))
         if isinstance(roh_land, str):
@@ -666,8 +680,9 @@ class _Handler(BaseHTTPRequestHandler):
             anzahl = 0
 
         from product.bridge.signal_discovery import SIGNAL_TYPES
-        if signal_typ not in SIGNAL_TYPES:
-            self._json({"ok": False, "meldung": f"Unbekannter Signaltyp: {signal_typ}"})
+        unbekannt = [s for s in signale if s not in SIGNAL_TYPES]
+        if unbekannt:
+            self._json({"ok": False, "meldung": f"Unbekannter Signaltyp: {', '.join(unbekannt)}"})
             return
         if not zielgruppe:
             self._json({"ok": False, "meldung": "Zielgruppe (Branche) ist Pflicht."})
@@ -685,11 +700,14 @@ class _Handler(BaseHTTPRequestHandler):
                 zielgruppe=zielgruppe, region=region,
                 lead_anzahl=anzahl, angebot=angebot or "—",
             )
-            runner.signal_suche_im_hintergrund(auftrag, signal_typ=signal_typ, laender=laender)
+            runner.signal_suche_im_hintergrund(
+                auftrag, signal_typ=signale, laender=laender,
+                linkedin_web=linkedin_web, linkedin_pro=linkedin_pro)
             wo = region if region else (", ".join(l.upper() for l in laender))
+            stapel = f" · {len(signale)} Signale gestapelt" if len(signale) > 1 else ""
             self._json({
                 "ok": True,
-                "meldung": f"Signal-Suche gestartet: {zielgruppe} · {wo}. "
+                "meldung": f"Signal-Suche gestartet: {zielgruppe} · {wo}{stapel}. "
                            "Ergebnisse erscheinen, sobald der Lauf fertig ist.",
             })
         except Exception as e:
@@ -735,6 +753,17 @@ class _Handler(BaseHTTPRequestHandler):
         if not lead_id:
             self._json({"ok": False, "meldung": "lead_id fehlt."}); return
         n = runner.signal_lead_loeschen(lead_id)
+        self._json({"ok": n > 0, "geloescht": n})
+
+    def _handle_agent_antwort_loeschen(self):
+        """POST /api/agent/antwort-loeschen — eine eingegangene Antwort löschen. Body: {id}."""
+        runner = self._get_runner()
+        if not runner:
+            self._json({"ok": False, "meldung": "Agent nicht verbunden."}); return
+        reply_id = str(self._signal_body().get("id", "")).strip()
+        if not reply_id:
+            self._json({"ok": False, "meldung": "id fehlt."}); return
+        n = runner.antwort_loeschen(reply_id)
         self._json({"ok": n > 0, "geloescht": n})
 
     def _handle_signal_run_loeschen(self):

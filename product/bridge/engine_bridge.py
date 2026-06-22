@@ -255,10 +255,12 @@ class EngineBridge:
     def suchen_per_signal(
         self,
         auftrag: Auftrag,
-        signal_typ: str = "sales_hiring",
+        signal_typ="sales_hiring",   # str ODER list[str] (Signal-Stapelung)
         *,
         cached_report: Optional[str] = None,
         laender=("de",),
+        linkedin_web: bool = False,
+        linkedin_pro: bool = False,
     ) -> EngineBrueckenErgebnis:
         """Sucht Firmen anhand eines Kaufsignals statt flach nach Branche.
 
@@ -279,6 +281,16 @@ class EngineBridge:
         self._pruefen(auftrag, ErlaubteAktion.SUCHEN_AUFBEREITEN)
         auftrag.starten()
 
+        # Signal-Stapelung: Eingabe zu einer Liste normalisieren (rückwärts-
+        # kompatibel — ein einzelner String bleibt der bewährte Einzelsignal-Pfad).
+        if isinstance(signal_typ, str):
+            signal_typen = [signal_typ.strip()] if signal_typ.strip() else []
+        else:
+            signal_typen = [str(s).strip().lower() for s in (signal_typ or []) if str(s).strip()]
+        # Duplikate raus, Reihenfolge erhalten; leer → Default.
+        signal_typen = list(dict.fromkeys(signal_typen)) or ["sales_hiring"]
+        signal_typ_label = "+".join(signal_typen)
+
         # Discovery-Breite an die Zielmenge koppeln (gedeckelt). Der frühere feste
         # 6er-Query-Cap war der Hauptgrund, warum eine Suche real nur ~5–12 Leads
         # brachte — egal wie viele bestellt waren. Jede Query = 1 SERPER-Call (Cent-
@@ -291,16 +303,18 @@ class EngineBridge:
         disc_queries = min(max(ziel + 4, 10), 30)
 
         try:
-            firmen = _sd.discover_with_websites(
+            firmen = _sd.discover_multi_signal(
                 self.engine_dir,
                 industry=auftrag.zielgruppe,
                 city=auftrag.region,
-                signal_type=signal_typ,
+                signal_types=signal_typen,
                 max_companies=ziel,
                 cached_report=cached_report,
                 laender=laender,
                 max_queries=disc_queries,
                 max_results_per_query=5,
+                linkedin_web=linkedin_web,
+                linkedin_pro=linkedin_pro,
             )
         except Exception as exc:  # noqa: BLE001
             kurz = f"Signal-Discovery fehlgeschlagen: {exc}"
@@ -346,7 +360,7 @@ class EngineBridge:
             return EngineBrueckenErgebnis(ok=False, meldung=kurz)
 
         leads = self._enrich_leads_lesen(ausgabe)
-        self._signal_an_leads_heften(leads, mit_website, signal_typ)
+        self._signal_an_leads_heften(leads, mit_website, signal_typen[0])
         # Kontakt-Anreicherung (Weg-2-Tiefe): Telefon aus bereits gescraptem Text
         # + persönlicher Mail-Vorschlag. Defensiv, kein Auto-Send, kein Live-Lookup.
         self._signal_kontakt_anreichern(leads)
@@ -370,18 +384,23 @@ class EngineBridge:
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
         # kippen — ohne Key/Signal bleibt es eine saubere generische Mail.
         self._signal_leads_personalisieren(leads)
-        self._signal_leads_schreiben(leads, auftrag, signal_typ, laender)
+        self._signal_leads_schreiben(leads, auftrag, signal_typ_label, laender,
+                                     signal_typen=signal_typen)
 
         mit_signal = sum(1 for l in leads if l.get("entdeckt_per_signal"))
+        # Heißgrad: wie viele Leads haben MEHR als ein Signal (Stapelungs-Nutzen).
+        mehrfach = sum(1 for l in leads if int(l.get("signal_count") or 0) >= 2)
+        zusatz = f", davon {mehrfach} mit mehreren Signalen" if len(signal_typen) > 1 else ""
         return EngineBrueckenErgebnis(
             ok=True,
             leads_gefunden=len(leads),
             leads_sauber=sum(1 for l in leads if int(l.get("contact_quality_score") or 0) >= 40),
-            meldung=f"Signal-Suche abgeschlossen: {len(leads)} Leads, {mit_signal} mit Signal.",
+            meldung=f"Signal-Suche abgeschlossen: {len(leads)} Leads, {mit_signal} mit Signal{zusatz}.",
             rohdaten={
                 "leads": leads,
                 "discovery": [f.als_dict() for f in firmen],
-                "signal_typ": signal_typ,
+                "signal_typ": signal_typ_label,
+                "signal_typen": signal_typen,
             },
         )
 
@@ -411,7 +430,12 @@ class EngineBridge:
         return h[4:] if h.startswith("www.") else h
 
     def _signal_an_leads_heften(self, leads: list[dict], firmen: list, signal_typ: str) -> None:
-        """Heftet das Job-Signal (Discovery) an die passenden Leads."""
+        """Heftet das Job-Signal (Discovery) an die passenden Leads.
+
+        Bei Signal-Stapelung trägt jede Firma mehrere Signaltypen (``signale``) und
+        je Signal einen Beleg (``signal_belege``). Das Primär-Signal (stärkster Fit)
+        bleibt in ``entdeckt_per_signal``; die volle Liste + Anzahl kommen extra dazu.
+        """
         by_host = {self._host(f.website): f for f in firmen if f.website}
         by_name = {(f.firma or "").casefold().strip(): f for f in firmen}
         for lead in leads:
@@ -420,21 +444,35 @@ class EngineBridge:
                 f = by_name.get((lead.get("company_name") or "").casefold().strip())
             if f is None:
                 continue
-            lead["entdeckt_per_signal"] = signal_typ
+            lead["entdeckt_per_signal"] = getattr(f, "signal_typ", "") or signal_typ
             lead["signal_titel"] = f.signal_titel
             lead["signal_quelle_url"] = f.quelle_url
             lead["signal_fit_score"] = f.fit_score
+            lead["signal_alter_tage"] = f.signal_alter_tage
+            # Signal-Stapelung: alle getroffenen Signale + Anzahl + Belege.
+            signale = list(getattr(f, "signale", None) or [lead["entdeckt_per_signal"]])
+            lead["signale"] = signale
+            lead["signal_count"] = len(signale)
+            lead["signal_belege"] = list(getattr(f, "signal_belege", None) or [])
 
     def _signal_kontakt_anreichern(self, leads: list[dict]) -> None:
         """Reichert Kontaktdaten an (Telefon aus bereits gescraptem Text +
-        persönlicher Mail-Vorschlag). Live-SERPER-Suche aktiv wenn
-        SERPER_API_KEY gesetzt (~1 Query je Lead ohne Nummer)."""
+        persönlicher Mail-Vorschlag).
+
+        Zwei OPT-IN-Anreicherungen, beide AUS per Default (0 €), je hinter einem
+        eigenen env-Key — feuern nur, wenn der Key gesetzt ist:
+          - ``SERPER_API_KEY``  → Live-Telefonsuche (~1 Query je Lead ohne Nummer).
+          - ``PDL_API_KEY``     → People-Data-Labs-Entscheider (Gap-Füller für Leads
+            ohne Impressum-Namen; ~$0,01–0,05 je Treffer). KOSTET GELD wenn gesetzt.
+        """
         try:
             import os
             from product.bridge import signal_contact_enrich as _ce
             serper_key = os.environ.get("SERPER_API_KEY", "").strip()
             sucher = _ce.make_serper_telefon_sucher(serper_key) if serper_key else None
-            _ce.anreichern(leads, telefon_sucher=sucher)
+            pdl_key = os.environ.get("PDL_API_KEY", "").strip()
+            person = _ce.make_pdl_person_enricher(pdl_key) if pdl_key else None
+            _ce.anreichern(leads, telefon_sucher=sucher, person_sucher=person)
         except Exception:
             pass
 
@@ -487,7 +525,8 @@ class EngineBridge:
                 lead.setdefault("aufhaenger", "")
 
     def _signal_leads_schreiben(
-        self, leads: list[dict], auftrag: Auftrag, signal_typ: str, laender=("de",)
+        self, leads: list[dict], auftrag: Auftrag, signal_typ: str, laender=("de",),
+        *, signal_typen: Optional[list] = None,
     ) -> Path:
         """Schreibt die Signal-Leads. Zwei Ziele:
         1) ``signal_leads.json`` = letzter Lauf (Kompatibilität: der CRM-Connector
@@ -496,6 +535,7 @@ class EngineBridge:
         """
         out = self._output_dir() / "latest" / "signal_leads.json"
         out.parent.mkdir(parents=True, exist_ok=True)
+        typen = list(signal_typen or ([signal_typ] if signal_typ else []))
         payload = {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "auftrag_id": auftrag.auftrags_id,
@@ -503,6 +543,7 @@ class EngineBridge:
             "region": auftrag.region,
             "laender": list(laender or []),
             "signal_typ": signal_typ,
+            "signal_typen": typen,
             "anzahl": len(leads),
             "mit_signal": sum(1 for l in leads if l.get("entdeckt_per_signal")),
             "leads": leads,
@@ -520,6 +561,7 @@ class EngineBridge:
                     "region": auftrag.region,
                     "laender": list(laender or []),
                     "signal_typ": signal_typ,
+                    "signal_typen": typen,
                     "label": _store.run_label({**payload}),
                 },
                 leads=leads,
@@ -569,7 +611,13 @@ class EngineBridge:
         }
         gruende, schritt = _lead_begruendung(e)
         sig = (l.get("entdeckt_per_signal") or "").strip()
-        if sig:
+        # Signal-Stapelung: alle Signale dieser Firma + lesbare Labels.
+        signale = [s for s in (l.get("signale") or ([sig] if sig else [])) if s]
+        signal_count = len(signale)
+        signale_labels = [self._SIGNAL_LABELS.get(s, s) for s in signale]
+        if signal_count >= 2:
+            gruende.insert(0, f"🔥 {signal_count} Signale: {', '.join(signale_labels)}")
+        elif sig:
             gruende.insert(0, f"Signal: {self._SIGNAL_LABELS.get(sig, sig)}")
         return {
             "lead_id": l.get("lead_id", ""),
@@ -590,6 +638,12 @@ class EngineBridge:
             "kaufbereitschaft_stufe": l.get("kaufbereitschaft_stufe", ""),
             "kaufbereitschaft_gruende": l.get("kaufbereitschaft_gruende", []),
             "kaufbereitschaft_beleg_url": l.get("kaufbereitschaft_beleg_url", "") or l.get("signal_quelle_url", ""),
+            "signal_alter_tage": l.get("signal_alter_tage"),
+            "signal_frische_text": l.get("signal_frische_text", ""),
+            "signale": signale,
+            "signale_labels": signale_labels,
+            "signal_count": signal_count,
+            "signal_belege": l.get("signal_belege", []),
             "notiz": l.get("notiz", ""),
             "mail_betreff": (l.get("personalisierte_mail") or {}).get("betreff", ""),
             "mail_body": (l.get("personalisierte_mail") or {}).get("body", ""),

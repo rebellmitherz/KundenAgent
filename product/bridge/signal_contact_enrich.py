@@ -132,6 +132,15 @@ def _local(email: str) -> str:
     return (email or "").split("@", 1)[0].lower().strip()
 
 
+def _domain(url: str) -> str:
+    """Bloße Domain aus einer Website-URL ('https://www.Firma.de/x' → 'firma.de')."""
+    u = (url or "").strip().lower()
+    if not u:
+        return ""
+    u = re.sub(r"^https?://", "", u).split("/", 1)[0]
+    return u[4:] if u.startswith("www.") else u
+
+
 def best_personal_email(lead: dict) -> str:
     """Bester persönlicher Mail-VORSCHLAG aus den Engine-Pattern-Vorschlägen,
     passend zum Entscheidernamen. KEINE Erfindung — nur Auswahl, und NUR echte
@@ -166,7 +175,7 @@ def _ist_generisch(email: str) -> bool:
     return (not email) or _local(email) in _ROLE_LOCALS
 
 
-def _ein_lead(lead: dict, stats: dict, telefon_sucher) -> None:
+def _ein_lead(lead: dict, stats: dict, telefon_sucher, person_sucher=None) -> None:
     # 0) Müll-Namen bereinigen: Scraper greift manchmal Tech-Markennamen oder
     #    Rechtstexte als GF-Namen (z. B. "Adobe Fonts", "Google Inc"). Leer ist
     #    besser als falsch — die Mail-Vorschlag-Logik läuft dann einfach leer.
@@ -175,6 +184,38 @@ def _ein_lead(lead: dict, stats: dict, telefon_sucher) -> None:
         if val and _ist_mull_name(val):
             lead[feld] = ""
             stats["mull_namen_bereinigt"] += 1
+
+    # 0.5) Entscheider-Anreicherung (OPT-IN, KOSTENPFLICHTIG). Läuft NUR, wenn ein
+    #     person_sucher injiziert wurde (= API-Key gesetzt → sonst None = 0 €) UND
+    #     der Lead noch KEINEN Namen hat (Gap-Füller, kein Pauschal-Anreichern) UND
+    #     eine Domain existiert. Füllt ausschließlich LEERE Felder — überschreibt
+    #     nie vorhandene Daten, schließt die LinkedIn-Personen-Lücke (0/14).
+    hat_namen = bool(
+        (lead.get("managing_director") or lead.get("contact_full_name")
+         or lead.get("contact_person") or "").strip()
+    )
+    if person_sucher and not hat_namen and (lead.get("website") or "").strip():
+        try:
+            treffer = person_sucher(lead) or {}
+        except Exception:
+            treffer = {}
+        name = (treffer.get("name") or "").strip() if isinstance(treffer, dict) else ""
+        if name and not _ist_mull_name(name):
+            lead["managing_director"] = lead.get("managing_director") or name
+            lead["contact_full_name"] = lead.get("contact_full_name") or name
+            lead["kontakt_anreicherung"] = "person_pdl"
+            stats["person_angereichert"] += 1
+            li = (treffer.get("linkedin_url") or "").strip()
+            if li and not (lead.get("linkedin_person_url") or "").strip():
+                lead["linkedin_person_url"] = li
+            tel = (treffer.get("phone") or "").strip()
+            if tel and not (lead.get("phone") or lead.get("phone_clean") or "").strip():
+                lead["phone"] = tel
+                lead["phone_clean"] = tel
+                lead["has_phone"] = True
+            mail = (treffer.get("email") or "").strip()
+            if mail and "@" in mail and not lead.get("persoenliche_mail_vorschlag"):
+                lead["persoenliche_mail_vorschlag"] = mail
 
     # 1) Telefon — nur wenn keins da. Erst aus bereits gescraptem Text (gratis),
     #    dann optional live (nur wenn ein Sucher injiziert wurde).
@@ -202,7 +243,9 @@ def _ein_lead(lead: dict, stats: dict, telefon_sucher) -> None:
 
     # 2) Persönliche Mail — NUR Vorschlag (nie in `email`, kein Auto-Send), und
     #    nur wenn die bisherige Mail generisch/leer ist (sonst kein Mehrwert).
-    if _ist_generisch(lead.get("email", "")):
+    #    Ein bereits gesetzter Vorschlag (z. B. echte PDL-Work-Mail) bleibt — eine
+    #    verifizierte Adresse schlägt jede Pattern-Vermutung.
+    if _ist_generisch(lead.get("email", "")) and not lead.get("persoenliche_mail_vorschlag"):
         vorschlag = best_personal_email(lead)
         if vorschlag and vorschlag.lower() != (lead.get("email") or "").lower():
             lead["persoenliche_mail_vorschlag"] = vorschlag
@@ -244,17 +287,77 @@ def make_serper_telefon_sucher(api_key: str):
     return _sucher
 
 
-def anreichern(leads: list[dict], *, telefon_sucher=None) -> dict:
+def make_pdl_person_enricher(api_key: str):
+    """Fabrik für einen People-Data-Labs-Entscheider-Sucher — OPT-IN, KOSTENPFLICHTIG.
+
+    ⚠️ KOSTET GELD (~$0,01–0,05 je Treffer). Wird NUR erzeugt/aktiv, wenn ein
+    ``PDL_API_KEY`` gesetzt ist — ohne Key gibt es diesen Sucher gar nicht (None)
+    und es entstehen **0 €**. Gedacht ausschließlich als **Gap-Füller** für Leads,
+    bei denen das (gratis) Impressum KEINEN Entscheidernamen lieferte — nicht zum
+    Pauschal-Anreichern aller Leads.
+
+    Gibt einen Callable ``lead -> dict`` zurück:
+    ``{name, email, phone, linkedin_url, title}`` (leeres dict wenn nichts).
+    Sucht über die Firmen-Domain einen Entscheider mit Leitungs-/Vertriebsrolle.
+    stdlib-only (urllib) — kein requests/httpx. Die SQL-Query wird beim ersten
+    echten Lauf gegen reale PDL-Treffer feinjustiert (Scaffold steht startklar).
+    """
+    import json as _json
+    import urllib.request as _req
+
+    def _sucher(lead: dict) -> dict:
+        dom = _domain(lead.get("website") or "")
+        if not dom:
+            return {}
+        try:
+            sql = (
+                "SELECT * FROM person "
+                f"WHERE job_company_website='{dom}' "
+                "AND job_title_levels IN ('owner','cxo','vp','director','manager')"
+            )
+            payload = _json.dumps({"sql": sql, "size": 1}).encode()
+            request = _req.Request(
+                "https://api.peopledatalabs.com/v5/person/search",
+                data=payload,
+                headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
+            )
+            with _req.urlopen(request, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            rec = (data.get("data") or [None])[0]
+            if not isinstance(rec, dict):
+                return {}
+            phones = rec.get("phone_numbers") or []
+            return {
+                "name": rec.get("full_name") or "",
+                "email": rec.get("work_email") or rec.get("recommended_personal_email") or "",
+                "phone": (rec.get("mobile_phone") or (phones[0] if phones else "")) or "",
+                "linkedin_url": rec.get("linkedin_url") or "",
+                "title": rec.get("job_title") or "",
+            }
+        except Exception:
+            return {}
+
+    return _sucher
+
+
+def anreichern(leads: list[dict], *, telefon_sucher=None, person_sucher=None) -> dict:
     """Reichert eine Lead-Liste in-place an. Defensiv: ein einzelner Fehler darf
     den Lauf nie kippen. Gibt eine kleine Statistik zurück.
 
     ``telefon_sucher``: optionaler Callable ``lead -> text`` für eine echte
     Live-Telefonsuche. Default ``None`` = nur gratis Text-Parse (kein Limit-Verbrauch).
+
+    ``person_sucher``: optionaler Callable ``lead -> dict`` (z. B. People Data Labs)
+    für eine KOSTENPFLICHTIGE Entscheider-Anreicherung. Default ``None`` = AUS = 0 €.
+    Läuft nur bei Leads OHNE Namen + mit Domain (Gap-Füller).
     """
-    stats = {"telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0, "mull_namen_bereinigt": 0}
+    stats = {
+        "telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0,
+        "mull_namen_bereinigt": 0, "person_angereichert": 0,
+    }
     for lead in leads or []:
         try:
-            _ein_lead(lead, stats, telefon_sucher)
+            _ein_lead(lead, stats, telefon_sucher, person_sucher)
         except Exception:
             continue
     return stats

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -85,6 +86,22 @@ class SignalFirma:
     fit_status: str = ""             # target_fit | maybe_fit | weak_fit | discard
     website: str = ""                # nach der Auflösung gesetzt
     website_confidence: float = 0.0
+    signal_alter_tage: Optional[int] = None  # Alter der Anzeige in Tagen (None = unbekannt)
+    signal_typ: str = ""             # der Signaltyp, der DIESE Firma getroffen hat
+    # Signal-Stapelung: ALLE Signaltypen, unter denen die Firma gefunden wurde
+    # (nach Fit absteigend, dedupliziert). Mehr Signale = härteres Kaufsignal.
+    signale: list[str] = field(default_factory=list)
+    # je Signaltyp die Quelle (titel/url/alter/fit) — fürs Beleg-Auflisten im Lead.
+    signal_belege: list[dict] = field(default_factory=list)
+
+    def __post_init__(self):
+        # signale immer mit dem primären Signal befüllen, falls leer übergeben.
+        if not self.signale and self.signal_typ:
+            self.signale = [self.signal_typ]
+
+    @property
+    def signal_count(self) -> int:
+        return len(self.signale)
 
     def als_dict(self) -> dict:
         return {
@@ -95,6 +112,11 @@ class SignalFirma:
             "fit_status": self.fit_status,
             "website": self.website,
             "website_confidence": self.website_confidence,
+            "signal_alter_tage": self.signal_alter_tage,
+            "signal_typ": self.signal_typ,
+            "signale": list(self.signale),
+            "signal_count": self.signal_count,
+            "signal_belege": list(self.signal_belege),
         }
 
 
@@ -304,6 +326,12 @@ _PORTAL_TEMPLATES_BY_LAND: dict[str, list[str]] = {
         'site:jobs.meinestadt.de {base} "{kw}"',
         'site:jobware.de {base} "{kw}"',
         'site:monster.de {base} "{kw}"',
+        # Aggregatoren/breite Portale (Volumen-Hebel, 2026-06). Detail-URLs tragen
+        # job/stellenangebot/stellenanzeige-Marker → der Classifier nimmt sie als
+        # job_detail_page; der Resolver skippt nur linkedin/xing, diese also nicht.
+        'site:stellenanzeigen.de {base} "{kw}"',
+        'site:kimeta.de {base} "{kw}"',
+        'site:jobvector.de {base} "{kw}"',
     ],
     "at": [
         'site:stepstone.at {base} "{kw}"',
@@ -430,7 +458,190 @@ def _build_signal_queries(
     return out
 
 
+def _keywords_fuer(signal_type: str) -> list[str]:
+    """Such-Keywords je Signaltyp (für Quellen, die nicht über die Portal-Templates
+    laufen — z. B. LinkedIn)."""
+    st = (signal_type or "").strip().lower()
+    return _SIGNAL_KEYWORDS.get(st) or _SALES_GROWTH_KEYWORDS.get(st) or ["Vertrieb"]
+
+
+# ─── LinkedIn als Quelle (gratis Web + Apify-Pro-Opt-in) ─────────────────────
+# LinkedIn/Xing werden vom Engine-Resolver hart übersprungen (Seiten nicht
+# fetchbar). LinkedIn-Job-Treffer tragen den ARBEITGEBER aber bereits im Google-
+# Titel ("Firma hiring Rolle …" / "Firma sucht Rolle …") — den parsen wir und
+# lösen die Website normal auf, OHNE je eine LinkedIn-Seite zu laden.
+
+_LI_LINKEDIN_RE = re.compile(r"\s*[|–\-]\s*linkedin\b.*$", re.I)
+_LI_HIRING_SEPS = (" hiring ", " is hiring ", " sucht ", " stellt ein", " einstellen")
+
+
+def _linkedin_company_from_title(title: str) -> str:
+    """Zieht den Firmennamen aus einem LinkedIn-Job-Suchtreffer-Titel.
+
+    Erkennt "Firma hiring Rolle …" (EN) und "Firma sucht Rolle …" (DE) sowie
+    "Rolle at/bei Firma". Gibt "" zurück, wenn nichts Verlässliches erkennbar ist.
+    """
+    t = _LI_LINKEDIN_RE.sub("", (title or "").strip()).strip()
+    if not t:
+        return ""
+    low = t.lower()
+    for sep in _LI_HIRING_SEPS:
+        idx = low.find(sep)
+        if idx > 0:
+            return t[:idx].strip(" -–|")
+    m = re.search(r"\b(?:at|bei)\s+(.+)$", t, re.I)
+    if m:
+        return m.group(1).strip(" -–|")
+    return ""
+
+
+def _linkedin_web_firmen(
+    engine_dir: Path, industry: str, city: str, signal_type: str, *,
+    max_companies: int = 10, provider: str = "serper",
+    max_results_per_query: int = 5, max_queries: int = 6,
+) -> list["SignalFirma"]:
+    """Gratis LinkedIn-Web-Quelle: öffentliche Job-Treffer via Google, Firma aus
+    dem Titel geparst. Kein LinkedIn-Fetch. Website-Auflösung passiert später."""
+    kws = _keywords_fuer(signal_type)
+    base = " ".join(p for p in [industry, city] if p).strip()
+    queries = [f'site:linkedin.com/jobs/view {base} "{kw}"'.strip() for kw in kws][:max_queries]
+    try:
+        with _engine_context(engine_dir):
+            from modules.intent_search_provider import search_intent_queries
+            batches = search_intent_queries(
+                queries, provider=provider, max_results_per_query=max_results_per_query)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[linkedin-web] Suche fehlgeschlagen: {exc}", flush=True)
+        return []
+
+    firmen: list[SignalFirma] = []
+    seen: set[str] = set()
+    for b in batches:
+        for item in b.get("results") or []:
+            url = str(item.get("url") or "")
+            if "linkedin.com/jobs" not in url.lower():
+                continue
+            title = str(item.get("title") or "")
+            name = _linkedin_company_from_title(title)
+            if not name:
+                continue
+            key = name.casefold().strip()
+            if key in seen:
+                continue
+            score, status = _fit_bewerten(name, title, industry, city, signal_type)
+            if status == "discard":
+                continue
+            seen.add(key)
+            alter = _alter_aus_meta(
+                {"date": str(item.get("date") or ""), "snippet": str(item.get("snippet") or "")},
+                None, title)
+            firmen.append(SignalFirma(
+                firma=name, signal_titel=title, quelle_url=url,
+                fit_score=score, fit_status=status, signal_alter_tage=alter,
+                signal_typ=signal_type,
+            ))
+    firmen.sort(key=lambda f: f.fit_score, reverse=True)
+    return firmen[:max_companies]
+
+
+def _apify_pro_firmen(
+    industry: str, city: str, signal_type: str, *,
+    max_companies: int = 10, api_key: str = "",
+) -> list["SignalFirma"]:
+    """OPT-IN LinkedIn-Pro via Apify (KOSTET GELD, AUS per Default).
+
+    Feuert nur, wenn ``APIFY_API_KEY`` gesetzt ist. Liefert strukturierte Job-Daten
+    inkl. Datum (→ speist die Signal-Frische). Actor via ``APIFY_LINKEDIN_ACTOR``
+    überschreibbar. Defensiv: jeder Fehler → [] (Suche läuft ohne LinkedIn-Pro weiter).
+
+    HINWEIS: bis Emilio einen Key hinterlegt + einen Live-Lauf macht, ist dieser
+    Pfad ungetestet — bewusst als Gerüst gebaut, das ohne Key 0 € kostet.
+    """
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return []
+    import json as _json
+    import urllib.request as _rq
+    import urllib.error as _er
+
+    actor = os.environ.get("APIFY_LINKEDIN_ACTOR", "bebity~linkedin-jobs-scraper").strip()
+    kws = _keywords_fuer(signal_type)
+    suchbegriff = " ".join(p for p in [kws[0] if kws else "", industry] if p).strip() or "Vertrieb"
+    payload = {
+        "title": suchbegriff,
+        "location": city or "Germany",
+        "rows": max(max_companies, 10),
+        "publishedAt": "",
+    }
+    url = (f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+           f"?token={api_key}&timeout=120")
+    try:
+        req = _rq.Request(
+            url, data=_json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with _rq.urlopen(req, timeout=130) as resp:
+            items = _json.loads(resp.read().decode("utf-8"))
+    except (_er.URLError, _er.HTTPError, TimeoutError, ValueError) as exc:
+        print(f"[linkedin-pro] Apify fehlgeschlagen: {exc}", flush=True)
+        return []
+    if not isinstance(items, list):
+        return []
+
+    firmen: list[SignalFirma] = []
+    seen: set[str] = set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("companyName") or it.get("company") or it.get("company_name") or "").strip()
+        if not name:
+            continue
+        key = name.casefold().strip()
+        if key in seen:
+            continue
+        titel = str(it.get("title") or it.get("jobTitle") or "").strip()
+        quelle = str(it.get("jobUrl") or it.get("link") or it.get("url") or "").strip()
+        score, status = _fit_bewerten(name, titel, industry, city, signal_type)
+        if status == "discard":
+            continue
+        seen.add(key)
+        datum = str(it.get("postedAt") or it.get("publishedAt") or it.get("postedTime") or "")
+        alter = _alter_aus_meta({"date": datum, "snippet": ""}, None, titel)
+        firmen.append(SignalFirma(
+            firma=name, signal_titel=titel, quelle_url=quelle,
+            fit_score=score, fit_status=status, signal_alter_tage=alter,
+            signal_typ=signal_type,
+        ))
+    firmen.sort(key=lambda f: f.fit_score, reverse=True)
+    return firmen[:max_companies]
+
+
 # ─── Schritt 1: Discovery ────────────────────────────────────────────────────
+
+def _alter_aus_meta(meta: dict, resolved: Optional[dict] = None, titel: str = "") -> Optional[int]:
+    """Anzeigenalter (Tage) aus SERP-Datum/Snippet/Titel + ggf. Preview-Feldern.
+
+    Reihenfolge: explizites SERP-`date` → Snippet → aufgelöste Preview-Felder →
+    Titel. ``None`` wenn nirgends ein Datum steckt. Defensiv (nie werfen)."""
+    try:
+        from product.bridge import signal_freshness as _fr
+    except Exception:
+        return None
+    teile = [
+        str((meta or {}).get("date") or ""),
+        str((meta or {}).get("snippet") or ""),
+    ]
+    if isinstance(resolved, dict):
+        teile += [
+            str(resolved.get("date_posted") or ""),
+            str(resolved.get("original_snippet") or ""),
+        ]
+    teile.append(titel or "")
+    for t in teile:
+        alter = _fr.signal_alter_tage(t)
+        if alter is not None:
+            return alter
+    return None
+
 
 def _aus_cache_laden(report_path: Path, industry: str, city: str, signal_type: str) -> list[SignalFirma]:
     """Lädt Firmen aus einem vorhandenen target_preview-Report (kein SERPER)."""
@@ -443,9 +654,13 @@ def _aus_cache_laden(report_path: Path, industry: str, city: str, signal_type: s
             continue
         titel = str(r.get("title") or "")
         score, status = _fit_bewerten(name, titel, industry, city, signal_type)
+        alter = _alter_aus_meta(
+            {"date": r.get("date", ""), "snippet": r.get("snippet", "")}, r, titel,
+        )
         out.append(SignalFirma(
             firma=name, signal_titel=titel, quelle_url=str(r.get("url") or ""),
-            fit_score=score, fit_status=status,
+            fit_score=score, fit_status=status, signal_alter_tage=alter,
+            signal_typ=signal_type,
         ))
     return out
 
@@ -516,11 +731,18 @@ def discover_companies(
     max_queries: int = 10,
     max_results_per_query: int = 5,
     laender=("de",),
+    linkedin_web: bool = False,
+    linkedin_pro: bool = False,
 ) -> list[SignalFirma]:
     """Findet Firmen anhand eines Kaufsignals (broad-Modus).
 
     Wenn ``cached_report`` gesetzt ist, wird der Report wiederverwendet
     (kein SERPER-Call) — fürs Bauen/Testen.
+
+    ``linkedin_web`` schaltet die gratis LinkedIn-Web-Quelle dazu; ``linkedin_pro``
+    die Apify-Quelle (nur aktiv, wenn ``APIFY_API_KEY`` gesetzt ist — kostet sonst 0 €).
+    Beide tragen denselben ``signal_type`` → sie stapeln/deduplizieren natürlich mit
+    den Portal-Treffern (gleiche Firma+Signal zählt NICHT doppelt).
     """
     engine_dir = Path(engine_dir).resolve()
     if cached_report:
@@ -547,7 +769,18 @@ def discover_companies(
                     "title": str(item.get("title") or ""),
                     "url": str(item.get("url") or ""),
                     "snippet": str(item.get("snippet") or ""),
+                    # SERPER liefert bei Job-/News-Treffern oft ein `date` ("2 days
+                    # ago" / "Mar 12, 2026") — der Rohstoff für die Signal-Frische.
+                    "date": str(item.get("date") or ""),
                 })
+
+        # Datum/Snippet je URL festhalten (überlebt die Engine-Klassifizierung
+        # nicht zuverlässig) → später das Anzeigenalter daraus ableiten.
+        roh_meta_by_url: dict[str, dict] = {}
+        for it in raw:
+            u = (it.get("url") or "").split("#")[0]
+            if u and u not in roh_meta_by_url:
+                roh_meta_by_url[u] = {"date": it.get("date", ""), "snippet": it.get("snippet", "")}
 
         classified = [{**it, **classify_portal_url({"url": it["url"], "title": it["title"], "snippet": it["snippet"]})} for it in raw]
         enriched = classify_job_detail_relevance(classified, industry=industry, city=city)
@@ -591,11 +824,28 @@ def discover_companies(
             score, status = _fit_bewerten(name, titel, industry, city, signal_type)
             if status == "discard":
                 continue
+            meta = roh_meta_by_url.get((cand.get("url") or "").split("#")[0], {})
+            alter = _alter_aus_meta(meta, resolved, titel)
             firmen.append(SignalFirma(
                 firma=name, signal_titel=titel,
                 quelle_url=str(resolved.get("original_url") or cand.get("url") or ""),
                 fit_score=score, fit_status=status,
+                signal_alter_tage=alter,
+                signal_typ=signal_type,
             ))
+
+    # LinkedIn-Quellen dazumischen (eigene Engine-Kontexte, außerhalb des obigen
+    # with-Blocks). Gleicher signal_type → Dedup unten fasst Doppelte zusammen.
+    if linkedin_web:
+        firmen.extend(_linkedin_web_firmen(
+            engine_dir, industry, city, signal_type,
+            max_companies=max_companies, provider=provider,
+            max_results_per_query=max_results_per_query))
+    if linkedin_pro:
+        firmen.extend(_apify_pro_firmen(
+            industry, city, signal_type,
+            max_companies=max_companies,
+            api_key=os.environ.get("APIFY_API_KEY", "")))
 
     # nach Fit sortieren, dedupe nach Firmenname
     firmen.sort(key=lambda f: f.fit_score, reverse=True)
@@ -661,6 +911,8 @@ def discover_with_websites(
     laender=("de",),
     max_queries: int = 10,
     max_results_per_query: int = 5,
+    linkedin_web: bool = False,
+    linkedin_pro: bool = False,
 ) -> list[SignalFirma]:
     """Discovery + Website-Auflösung in einem Schritt."""
     firmen = discover_companies(
@@ -668,12 +920,140 @@ def discover_with_websites(
         max_companies=max_companies, provider=provider, cached_report=cached_report,
         laender=laender,
         max_queries=max_queries, max_results_per_query=max_results_per_query,
+        linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
     )
     for f in firmen:
         url, conf = resolve_website(engine_dir, f.firma, city, provider=provider)
         f.website = url
         f.website_confidence = conf
     return firmen
+
+
+# ─── Signal-Stapelung: mehrere Signaltypen in einem Lauf ─────────────────────
+
+def _firmen_vereinen(per_signal: list[tuple[str, list["SignalFirma"]]]) -> list["SignalFirma"]:
+    """Legt die Treffer mehrerer Signal-Läufe ZUSAMMEN (Union, nicht Schnittmenge).
+
+    Eine Firma, die unter mehreren Signaltypen auftaucht, wird EINMAL geführt —
+    mit der Liste aller Signaltypen (``signale``), dem stärksten Einzeltreffer als
+    Primär-Signal (Titel/URL/Fit/Alter) und je Signal einem Beleg. Genau das macht
+    aus „8 + 8 + 8" keine 0, sondern ~20 mit Heißgrad-Ranking obendrauf.
+    """
+    by_name: dict[str, "SignalFirma"] = {}
+    # belege je Firma: signaltyp → bester Beleg-Dict (höchster Fit gewinnt)
+    belege: dict[str, dict[str, dict]] = {}
+    for signal_typ, firmen in per_signal:
+        for f in firmen:
+            key = f.firma.casefold().strip()
+            if not key:
+                continue
+            beleg = {
+                "signal_typ": signal_typ,
+                "signal_label": SIGNAL_LABELS.get(signal_typ, signal_typ),
+                "titel": f.signal_titel,
+                "quelle_url": f.quelle_url,
+                "fit_score": f.fit_score,
+                "alter_tage": f.signal_alter_tage,
+            }
+            slot = belege.setdefault(key, {})
+            if signal_typ not in slot or f.fit_score > slot[signal_typ]["fit_score"]:
+                slot[signal_typ] = beleg
+
+            cur = by_name.get(key)
+            if cur is None:
+                # Kopie als Primär-Träger; signale füllen wir am Ende auf.
+                by_name[key] = SignalFirma(
+                    firma=f.firma, signal_titel=f.signal_titel, quelle_url=f.quelle_url,
+                    fit_score=f.fit_score, fit_status=f.fit_status,
+                    signal_alter_tage=f.signal_alter_tage, signal_typ=signal_typ,
+                )
+            elif f.fit_score > cur.fit_score:
+                # stärkerer Einzeltreffer wird zum Primär-Signal der Firma
+                cur.signal_titel = f.signal_titel
+                cur.quelle_url = f.quelle_url
+                cur.fit_score = f.fit_score
+                cur.fit_status = f.fit_status
+                cur.signal_typ = signal_typ
+                if f.signal_alter_tage is not None:
+                    cur.signal_alter_tage = f.signal_alter_tage
+            elif cur.signal_alter_tage is None and f.signal_alter_tage is not None:
+                cur.signal_alter_tage = f.signal_alter_tage
+
+    out: list["SignalFirma"] = []
+    for key, firma in by_name.items():
+        slot = belege.get(key, {})
+        # Signale nach Fit absteigend ordnen, Primär-Signal zuerst.
+        geordnet = sorted(slot.values(), key=lambda b: b["fit_score"], reverse=True)
+        firma.signale = [b["signal_typ"] for b in geordnet]
+        firma.signal_belege = geordnet
+        out.append(firma)
+
+    # Ranking: zuerst Heißgrad (Anzahl Signale), dann Fit. Mehrfach-Signal nach oben.
+    out.sort(key=lambda f: (f.signal_count, f.fit_score), reverse=True)
+    return out
+
+
+def discover_multi_signal(
+    engine_dir: str | Path,
+    industry: str,
+    city: str,
+    signal_types: list[str],
+    *,
+    max_companies: int = 10,
+    provider: str = "serper",
+    cached_report: Optional[str | Path] = None,
+    laender=("de",),
+    max_queries: int = 10,
+    max_results_per_query: int = 5,
+    linkedin_web: bool = False,
+    linkedin_pro: bool = False,
+) -> list[SignalFirma]:
+    """Stapelung: Discovery über MEHRERE Signaltypen, vereint + heißgrad-sortiert.
+
+    Pro Signaltyp läuft die bewährte ``discover_companies`` (broad), danach werden
+    die Treffer per ``_firmen_vereinen`` zusammengelegt. Website-Auflösung erst
+    NACH der Union — Duplikate kosten so keinen zweiten SERPER-Call. Ergibt MEHR
+    Firmen als ein Einzelsignal, mit Mehrfach-Signal-Firmen ganz oben.
+
+    ``linkedin_web``/``linkedin_pro`` werden je Signaltyp als zusätzliche QUELLE
+    mitgesucht (gleicher Signaltyp → kein Doppelzählen beim Stapeln).
+    """
+    typen = [t for t in dict.fromkeys((s or "").strip().lower() for s in signal_types) if t]
+    if not typen:
+        typen = ["sales_hiring"]
+    if len(typen) == 1:
+        # Kein Stapelungs-Overhead bei nur einem Signal — exakt der alte Pfad.
+        return discover_with_websites(
+            engine_dir, industry, city, typen[0],
+            max_companies=max_companies, provider=provider, cached_report=cached_report,
+            laender=laender, max_queries=max_queries, max_results_per_query=max_results_per_query,
+            linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
+        )
+
+    # Roh-Discovery je Signal — bewusst je Signal bis max_companies, damit die
+    # Union genug Masse hat. Website-Auflösung ist hier noch AUS.
+    per_signal: list[tuple[str, list[SignalFirma]]] = []
+    for st in typen:
+        try:
+            firmen = discover_companies(
+                engine_dir, industry, city, st,
+                max_companies=max_companies, provider=provider, cached_report=cached_report,
+                laender=laender, max_queries=max_queries, max_results_per_query=max_results_per_query,
+                linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
+            )
+        except Exception as exc:  # noqa: BLE001 — ein kaputtes Signal darf den Lauf nicht kippen
+            print(f"[signal-stapelung] Signal {st!r} fehlgeschlagen: {exc}", flush=True)
+            firmen = []
+        per_signal.append((st, firmen))
+
+    vereint = _firmen_vereinen(per_signal)[:max_companies]
+
+    # Website-Auflösung einmalig je verbleibender Firma.
+    for f in vereint:
+        url, conf = resolve_website(engine_dir, f.firma, city, provider=provider)
+        f.website = url
+        f.website_confidence = conf
+    return vereint
 
 
 # ─── Schritt 3: CSV für mine.py --mode enrich ────────────────────────────────

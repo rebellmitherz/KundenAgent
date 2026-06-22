@@ -59,6 +59,31 @@ def test_persoenliche_vs_sammelmail():
     assert r._hat_persoenliche_mail("") is False
 
 
+def test_frische_senkt_altes_signal():
+    # Gleicher Lead, einmal frisch, einmal >90 Tage alt → alt hat klar weniger Score.
+    frisch = r.bewerten(_lead(signal_alter_tage=3))
+    alt = r.bewerten(_lead(signal_alter_tage=200))
+    assert frisch["score"] > alt["score"], (frisch["score"], alt["score"])
+    # Frisches Signal nennt die Anzeige als Verkaufsargument …
+    assert any("frisch" in g.lower() for g in frisch["gruende"]), frisch["gruende"]
+    # … altes Signal warnt ehrlich.
+    assert any("aktualität" in g.lower() or "⚠" in g for g in alt["gruende"]), alt["gruende"]
+
+
+def test_frische_unbekannt_kein_abschlag():
+    # Ohne signal_alter_tage darf sich gegenüber „frisch" nichts ändern (Faktor 1.0).
+    ohne = r.bewerten(_lead())
+    frisch = r.bewerten(_lead(signal_alter_tage=5))
+    assert ohne["score"] == frisch["score"], (ohne["score"], frisch["score"])
+
+
+def test_anreichern_setzt_frische_felder():
+    leads = [_lead(signal_alter_tage=3)]
+    r.anreichern(leads)
+    assert leads[0]["signal_alter_tage"] == 3
+    assert leads[0]["signal_frische_text"] == "vor 3 Tagen"
+
+
 def test_anreichern_schreibt_alle_felder():
     leads = [_lead(), {"company_name": "Leer"}]  # zweiter ohne Signal/Kontakt
     r.anreichern(leads)
@@ -76,6 +101,26 @@ def test_anreichern_defensiv_bei_muellwerten():
               "contact_quality_score": None}]
     r.anreichern(leads)  # darf nicht werfen
     assert 0 <= leads[0]["kaufbereitschaft_score"] <= 100
+
+
+def test_stapelung_hebt_score_und_gibt_heissgrad_grund():
+    base = {"signal_fit_score": 0.6, "contact_quality_score": 50, "phone": "+4955",
+            "email": "max.muster@x.de", "signal_titel": "X", "signal_quelle_url": "https://x/j"}
+    ein = r.bewerten({**base, "entdeckt_per_signal": "sales_hiring", "signale": ["sales_hiring"]})
+    drei = r.bewerten({**base, "entdeckt_per_signal": "sales_hiring",
+                       "signale": ["sales_hiring", "appointment_setter", "growth_expansion"]})
+    assert drei["score"] > ein["score"]                       # Stapelung hebt
+    assert "gleichzeitige" in drei["gruende"][0]              # Heißgrad-Grund zuerst
+    assert "gleichzeitige" not in ein["gruende"][0]
+
+
+def test_stapel_bonus_gedeckelt_und_geklemmt():
+    base = {"signal_fit_score": 0.9, "contact_quality_score": 90, "phone": "+4955",
+            "email": "max.muster@x.de"}
+    fuenf = r.bewerten({**base, "entdeckt_per_signal": "appointment_setter",
+                        "signale": ["appointment_setter", "sales_hiring", "growth_expansion",
+                                    "marketing_hiring", "new_location"]})
+    assert fuenf["score"] <= 100                              # nie über 100
 
 
 def _run_all():

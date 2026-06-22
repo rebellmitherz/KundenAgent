@@ -184,6 +184,74 @@ def test_anreichern_behaelt_echte_namen():
     assert lead["contact_full_name"] == "Angela Bisping"
 
 
+# ─── _domain: Domain aus Website ─────────────────────────────────────────────
+
+def test_domain_aus_website():
+    assert ce._domain("https://www.Firma.de/impressum") == "firma.de"
+    assert ce._domain("http://beispiel.com") == "beispiel.com"
+    assert ce._domain("") == ""
+
+
+# ─── Entscheider-Anreicherung (OPT-IN, injizierter Fake-Sucher, kein Netz) ────
+
+def _fake_person(**felder):
+    """Baut einen person_sucher, der ein festes dict liefert."""
+    return lambda lead: dict(felder)
+
+
+def test_person_enrichment_fuellt_leeren_namen():
+    lead = {"website": "https://firma.de", "email": "info@firma.de"}
+    sucher = _fake_person(name="Petra Klein", linkedin_url="https://linkedin.com/in/petra",
+                          phone="+49 30 111", email="petra.klein@firma.de", title="Vertriebsleiterin")
+    stats = ce.anreichern([lead], person_sucher=sucher)
+    assert lead["managing_director"] == "Petra Klein"
+    assert lead["contact_full_name"] == "Petra Klein"
+    assert lead["linkedin_person_url"] == "https://linkedin.com/in/petra"
+    assert lead["persoenliche_mail_vorschlag"] == "petra.klein@firma.de"
+    assert lead["kontakt_anreicherung"] == "person_pdl"
+    assert stats["person_angereichert"] == 1
+
+
+def test_person_enrichment_ueberschreibt_vorhandenen_namen_nicht():
+    lead = {"website": "https://firma.de", "email": "info@firma.de", "managing_director": "Jens Thiele"}
+    sucher = _fake_person(name="Wer Anders")
+    stats = ce.anreichern([lead], person_sucher=sucher)
+    assert lead["managing_director"] == "Jens Thiele"  # unverändert
+    assert stats["person_angereichert"] == 0
+
+
+def test_person_enrichment_ohne_website_kein_call():
+    def _explodiert(lead):
+        raise AssertionError("person_sucher darf ohne Website nicht aufgerufen werden")
+    lead = {"email": "info@firma.de"}  # keine website
+    ce.anreichern([lead], person_sucher=_explodiert)  # darf nicht crashen
+    assert "managing_director" not in lead or not lead.get("managing_director")
+
+
+def test_person_enrichment_defensiv_bei_fehler():
+    def _explodiert(lead):
+        raise RuntimeError("API down")
+    lead = {"website": "https://firma.de", "email": "info@firma.de"}
+    stats = ce.anreichern([lead], person_sucher=_explodiert)  # Fehler geschluckt
+    assert stats["person_angereichert"] == 0
+
+
+def test_person_enrichment_aus_per_default():
+    # Ohne person_sucher (= kein Key) passiert NICHTS Kostenpflichtiges.
+    lead = {"website": "https://firma.de", "email": "info@firma.de"}
+    stats = ce.anreichern([lead])
+    assert stats["person_angereichert"] == 0
+    assert not lead.get("managing_director")
+
+
+def test_person_enrichment_mull_name_abgelehnt():
+    # Selbst die teure Quelle darf keinen Garbage-Namen setzen.
+    lead = {"website": "https://firma.de", "email": "info@firma.de"}
+    stats = ce.anreichern([lead], person_sucher=_fake_person(name="Google Inc"))
+    assert not lead.get("managing_director")
+    assert stats["person_angereichert"] == 0
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     ok = 0
