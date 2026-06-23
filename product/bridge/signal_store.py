@@ -20,6 +20,7 @@ den Suchlauf (Lesen gibt im Zweifel leere Liste).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -37,18 +38,35 @@ def _store_path(output_dir: str | Path) -> Path:
 
 
 def _load(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("runs"), list):
-            return data
-    except Exception:
-        pass
+    # Haupt-Datei zuerst, dann die .bak-Sicherung (Recovery, falls die Haupt-
+    # Datei durch einen abgebrochenen Schreibvorgang leer/kaputt ist). So gehen
+    # gespeicherte Suchen nicht verloren, nur weil ein Schreiben schiefging.
+    for p in (path, path.with_suffix(path.suffix + ".bak")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("runs"), list):
+                return data
+        except Exception:
+            continue
     return {"runs": []}
 
 
 def _save(path: Path, data: dict) -> None:
+    """Schreibt den Store ATOMAR. Vorher überschrieb ein abgebrochener oder mit
+    einem zweiten Lauf überlappender ``write_text`` die Datei mittendrin → sie
+    wurde leer und ALLE bisherigen Suchen waren weg (genau der „letzte Suche
+    plötzlich verschwunden"-Effekt). Jetzt: in temp schreiben, alten Stand als
+    .bak sichern, dann atomar per ``os.replace`` einsetzen."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    txt = json.dumps(data, ensure_ascii=False, indent=2)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(txt, encoding="utf-8")
+    try:
+        if path.exists():
+            os.replace(path, path.with_suffix(path.suffix + ".bak"))
+    except OSError:
+        pass
+    os.replace(tmp, path)
 
 
 def append_run(output_dir: str | Path, *, run_id: str, meta: dict, leads: list[dict]) -> str:
