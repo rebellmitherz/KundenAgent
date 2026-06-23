@@ -250,6 +250,39 @@ def _ist_grosskonzern_struktur(match_name: str) -> bool:
     return any(ind in match_name for ind in _GROSSKONZERN_STRUKTUR)
 
 
+# ─── Rollen-/Funktionswörter sind KEINE Branche ─────────────────────────────
+# Genau der Intake-Defekt: „Vertrieb" als Zielbranche matcht jede Firma (Branche
+# UND Signal zugleich → alles ist „passend"). Diese Wörter sind Rollen/Funktionen,
+# keine Branche — sie werden als Zielbranche abgelehnt (Intake) und zählen nicht
+# zum ICP-Fit (_fit_bewerten). Das Kaufsignal wählt man separat (Checkboxen).
+ROLLEN_WORTE = frozenset({
+    "vertrieb", "vertriebler", "vertriebsmitarbeiter", "sales", "verkauf",
+    "verkaeufer", "verkäufer", "akquise", "akquisition", "kaltakquise",
+    "neukundengewinnung", "sdr", "bdr", "terminierer", "terminierung",
+    "appointment", "setter", "außendienst", "aussendienst", "innendienst",
+    "account", "accountmanager", "businessdevelopment", "telefonist",
+    "telesales", "telefonakquise", "closer", "salesmanager",
+    # Rollen-Suffixe, die als eigenes Token auftreten (z. B. „Sales Manager",
+    # „Vertriebs Leiter"). Echte Branchen-Compounds bleiben EIN Token (z. B.
+    # „Vertriebsleitung"/„Eventmanagement") und werden NICHT getroffen.
+    "manager", "leiter", "leitung", "mitarbeiter",
+})
+
+# Füllwörter, die bei der Rollenwort-Prüfung ignoriert werden (z. B. „Vertrieb im B2B").
+_BRANCHE_FUELLER = frozenset({
+    "in", "im", "fuer", "für", "und", "der", "die", "das", "den", "mit", "b2b",
+    "b2c", "bereich", "team",
+})
+
+
+def ist_rollenwort(text: str) -> bool:
+    """True, wenn `text` AUSSCHLIESSLICH aus Rollen-/Funktionswörtern besteht
+    (= keine echte Branche). „Vertrieb"/„Sales Manager" → True; „Maschinenbau",
+    „IT-Dienstleister", „Vertriebsberatung" → False. Leer → False (Pflicht separat)."""
+    inhalt = {t for t in _tokens(text) if t} - _BRANCHE_FUELLER
+    return bool(inhalt) and inhalt <= ROLLEN_WORTE
+
+
 def _fit_bewerten(firma: str, titel: str, industry: str, city: str, signal_type: str) -> tuple[float, str]:
     """Fit gegen die ECHTEN Auftrags-Parameter (nicht die Engine-Hardcodes).
 
@@ -268,7 +301,11 @@ def _fit_bewerten(firma: str, titel: str, industry: str, city: str, signal_type:
         return 0.0, "discard"
 
     hay = f"{firma} {titel}".lower()
-    ind_tokens = _tokens(industry)
+    # ICP-Fit gegen die ECHTE Branche: Rollen-/Funktionswörter (z. B. „Vertrieb")
+    # zählen NICHT als Branchen-Treffer — sonst würde der Jobtitel doppelt gewertet
+    # (einmal als Branche, einmal als Signal) und alles wirkt „passend". Das Signal
+    # matcht weiterhin separat über sig_terms.
+    ind_tokens = {t for t in _tokens(industry) if t not in ROLLEN_WORTE}
     city_tokens = _tokens(city)
     sig_terms = _SIGNAL_BEGRIFFE.get(signal_type, [])
 

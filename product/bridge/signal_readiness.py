@@ -47,11 +47,30 @@ _W_SIGNAL = 0.45
 _W_FIT = 0.25
 _W_KONTAKT = 0.30
 
-# Sammel-Postfächer — eine persönliche Adresse ist mehr wert als info@.
-_GENERISCHE_MAIL_PREFIXES = (
-    "info", "kontakt", "mail", "office", "hello", "hallo", "post",
-    "contact", "service", "support", "willkommen", "anfrage",
-)
+# E-Mail-Rang der Engine: „D"/E/F = missing/unverifiziert = Fake/Bounce-Klasse
+# (kein nutzbarer Mail-Kanal). A=personal, B=partial, C=generic_mailbox.
+_RANG_FAKE = frozenset({"d", "e", "f"})
+
+# Numerischer Rang der Stufen — fürs Deckeln (nur senken, nie anheben).
+_STUFE_RANG = {HOCH: 3, MITTEL: 2, NIEDRIG: 1}
+
+# Sammel-/Rollen-Postfächer — eine persönliche Adresse ist mehr wert als info@.
+# Bewusst breit: eine Adresse fälschlich „persönlich" zu nennen kostet beim
+# Kunden Glaubwürdigkeit. Lieber konservativ (siehe ist_persoenliche_mail).
+_GENERISCHE_MAIL_PREFIXES = {
+    "info", "kontakt", "contact", "mail", "email", "mails", "office", "buero", "bureau",
+    "hello", "hallo", "moin", "post", "service", "support", "willkommen", "welcome",
+    "anfrage", "anfragen", "kundenservice", "kundendienst", "vertrieb", "sales",
+    "team", "zentrale", "empfang", "reception", "sekretariat", "verwaltung",
+    "buchhaltung", "rechnung", "rechnungen", "finance", "finanzen", "accounting",
+    "einkauf", "bestellung", "bestellungen", "order", "shop", "verkauf", "beratung",
+    "presse", "press", "media", "marketing", "werbung", "pr",
+    "jobs", "job", "karriere", "career", "careers", "bewerbung", "bewerbungen",
+    "recruiting", "hr", "personal", "datenschutz", "dsgvo", "privacy", "impressum",
+    "webmaster", "admin", "noreply", "donotreply", "newsletter", "news",
+    "abo", "praxis", "kanzlei", "termin", "termine", "anmeldung", "reservierung",
+    "reservation", "booking", "billing", "invoice", "feedback", "kontaktformular",
+}
 
 
 def _signal_staerke(signal_typ: str) -> float:
@@ -66,11 +85,65 @@ def _fit(lead: dict) -> float:
     return max(0.0, min(1.0, f))
 
 
-def _hat_persoenliche_mail(email: str) -> bool:
+def _local_tokens(local: str) -> list[str]:
+    """Zerlegt den local-part (vor dem @) an Trennern/Ziffern in Namens-Tokens."""
+    for sep in ".-_+":
+        local = local.replace(sep, " ")
+    for d in "0123456789":
+        local = local.replace(d, " ")
+    return [t for t in local.split() if t]
+
+
+def ist_persoenliche_mail(email: str, contact_name: str = "") -> bool:
+    """True NUR, wenn die Adresse plausibel einen Personennamen trägt.
+
+    Konservativ — eine falsche „persönlich"-Behauptung kostet Glaubwürdigkeit:
+      • jedes Rollenwort im local-part (info, kontakt, vertrieb, service, …,
+        auch in `info.berlin@`/`vertrieb-nord@`) ⇒ NICHT persönlich.
+      • deckt sich der local-part mit dem bekannten Ansprechpartner ⇒ persönlich.
+      • Muster `vorname.nachname@` (≥2 alphabetische Tokens) ⇒ persönlich.
+      • alles andere (bloßes `markus@`, `t.online@`, Kürzel) ⇒ NICHT persönlich.
+    """
     email = (email or "").strip().lower()
     if "@" not in email:
         return False
-    return email.split("@", 1)[0] not in _GENERISCHE_MAIL_PREFIXES
+    local = email.split("@", 1)[0].strip()
+    toks = _local_tokens(local)
+    if not toks:
+        return False
+    if local in _GENERISCHE_MAIL_PREFIXES or any(t in _GENERISCHE_MAIL_PREFIXES for t in toks):
+        return False
+    name = (contact_name or "").lower()
+    for ch in ".,-_/\\":
+        name = name.replace(ch, " ")
+    nt = [t for t in name.split() if len(t) >= 3]
+    if nt and any(t in toks for t in nt):
+        return True
+    alpha = [t for t in toks if t.isalpha() and len(t) >= 2]
+    return len(alpha) >= 2
+
+
+# Rückwärtskompatibler Alias (alter Name).
+def _hat_persoenliche_mail(email: str, contact_name: str = "") -> bool:
+    return ist_persoenliche_mail(email, contact_name)
+
+
+# Dt. Mobilfunk-Vorwahlen (015x/016x/017x bzw. +4915…). Eine Mobilnummer ist
+# eher ein Direktkontakt — eine Festnetz-Zentrale NICHT als „direkt" verkaufen.
+def ist_mobilnummer(phone: str) -> bool:
+    p = (phone or "").strip()
+    if not p:
+        return False
+    digits = "".join(c for c in p if c.isdigit())
+    if p.lstrip().startswith("+"):
+        if digits.startswith("49"):
+            digits = digits[2:]
+        else:
+            return False  # nur DE-Mobil sicher erkennbar
+    elif digits.startswith("0049"):
+        digits = digits[4:]
+    digits = digits.lstrip("0")
+    return digits.startswith(("15", "16", "17"))
 
 
 def _frische(lead: dict) -> tuple[float, str, Optional[int]]:
@@ -95,7 +168,8 @@ def _kontakt_komponente(lead: dict) -> tuple[float, bool, bool]:
         cq = 0.0
     cq = max(0.0, min(1.0, cq / 100.0))
     phone = bool((lead.get("phone") or lead.get("phone_clean") or lead.get("contact_phone") or "").strip())
-    pers_mail = _hat_persoenliche_mail(lead.get("email") or lead.get("contact_email") or "")
+    name = lead.get("contact_full_name") or lead.get("managing_director") or lead.get("contact_person") or ""
+    pers_mail = ist_persoenliche_mail(lead.get("email") or lead.get("contact_email") or "", name)
     komp = cq * 0.6 + (0.2 if phone else 0.0) + (0.2 if pers_mail else 0.0)
     return max(0.0, min(1.0, komp)), phone, pers_mail
 
@@ -110,6 +184,55 @@ def _signale_des_leads(lead: dict, primaer: str) -> list[str]:
     if not out and primaer:
         out = [primaer]
     return list(dict.fromkeys(out))
+
+
+def _stufe_deckeln(stufe: str, obergrenze: Optional[str]) -> str:
+    """Senkt ``stufe`` auf ``obergrenze`` — hebt NIE an (Deckel, kein Hebel)."""
+    if not obergrenze:
+        return stufe
+    if _STUFE_RANG.get(stufe, 1) > _STUFE_RANG.get(obergrenze, 2):
+        return obergrenze
+    return stufe
+
+
+def _engine_deckelung(lead: dict, score: int, *, phone: bool, pers_mail: bool):
+    """Härtet den Score am Engine-Urteil (Schritt 2 Premium-Gate).
+
+    Ein heißes Signal allein macht einen Lead nicht sendefähig: ``ready_to_send=no``,
+    ein Fake/Bounce-E-Mail-Rang, ``do_not_contact`` oder eine reine Rollen-/Sammel-
+    Mail ohne Telefon dürfen NIE als „hoch" durchgehen. Greift nur, wenn das jeweilige
+    Feld wirklich gesetzt ist (fehlt es = kein Abschlag — bleibt rückwärtskompatibel).
+
+    Rückgabe: (gesenkter Score, harte Stufen-Obergrenze|None, Warn-Gründe).
+    """
+    gruende: list[str] = []
+    obergrenze: Optional[str] = None
+
+    if lead.get("do_not_contact"):                       # hart: nicht ansprechen
+        score = min(score, 25)
+        obergrenze = NIEDRIG
+        gruende.append("⚠ Engine: do_not_contact — nicht ansprechen")
+
+    rts = str(lead.get("ready_to_send") or "").strip().lower()
+    if rts == "no":                                      # Engine sagt: nicht sendefähig
+        score = min(score, 60)
+        if obergrenze != NIEDRIG:
+            obergrenze = MITTEL
+        block = str(lead.get("ready_to_send_block_reason") or "").strip()
+        gruende.append("⚠ Engine: noch nicht sendefähig" + (f" ({block})" if block else ""))
+
+    rang = str(lead.get("email_quality_rank") or "").strip().lower()
+    if rang in _RANG_FAKE:                                # missing/Fake-Bounce-Mail
+        score = max(0, score - 15)
+        gruende.append(f"⚠ E-Mail-Qualität niedrig (Rang {rang.upper()} — unverifiziert/Fake-Bounce)")
+
+    mail = str(lead.get("email") or lead.get("contact_email") or "").strip()
+    if mail and not pers_mail and not phone:             # nur Rollen-Mail, kein Telefon
+        if obergrenze != NIEDRIG:
+            obergrenze = MITTEL
+        gruende.append("⚠ nur Sammel-/Rollen-Mail, kein Telefon — schwacher Kontakt")
+
+    return score, obergrenze, gruende
 
 
 def bewerten(lead: dict) -> dict:
@@ -139,12 +262,18 @@ def bewerten(lead: dict) -> dict:
     stapel_bonus = min(extra * 8, 20)
     score = min(100, score + stapel_bonus)
 
+    # Engine-Urteil härtet den Score (Schritt 2): ready_to_send=no, Fake-Mail-Rang,
+    # do_not_contact und reine Rollen-Mail ohne Telefon dürfen nie „hoch" tragen.
+    score, obergrenze, engine_gruende = _engine_deckelung(
+        lead, score, phone=phone, pers_mail=pers_mail)
+
     if score >= 70:
         stufe = HOCH
     elif score >= 45:
         stufe = MITTEL
     else:
         stufe = NIEDRIG
+    stufe = _stufe_deckeln(stufe, obergrenze)
 
     gruende: list[str] = []
     if extra >= 1:
@@ -163,12 +292,18 @@ def bewerten(lead: dict) -> dict:
         gruende.append(f"Hohe Passung zur Zielgruppe (Fit {fit:.2f})")
     elif fit >= 0.45:
         gruende.append(f"Solide Passung (Fit {fit:.2f})")
+    tel_roh = (lead.get("phone") or lead.get("phone_clean") or lead.get("contact_phone") or "").strip()
+    mobil = ist_mobilnummer(tel_roh)
+    tel_label = "Mobilnummer (Direktkontakt)" if mobil else "Telefonnummer vorhanden"
     if phone and pers_mail:
-        gruende.append("Direkt erreichbar: Telefon + persönliche E-Mail")
+        gruende.append(f"{tel_label} + persönliche E-Mail")
     elif phone:
-        gruende.append("Telefon vorhanden — direkt anrufbar")
+        gruende.append(tel_label)
     elif pers_mail:
-        gruende.append("Persönliche E-Mail-Adresse gefunden")
+        gruende.append("Persönliche E-Mail-Adresse")
+
+    # Engine-Warnungen zuerst — eine ehrliche Warnung ist wichtiger als ein Lob.
+    gruende = engine_gruende + gruende
 
     return {
         "score": score,

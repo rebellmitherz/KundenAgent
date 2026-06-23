@@ -90,12 +90,45 @@ _MULL_NAME_TOKENS = frozenset({
 _MULL_DIGIT_RE = re.compile(r"\d")
 _MULL_RECHT_RE = re.compile(r"[§©®™]|gmbh\s*&|e\.?\s*v\.?\b", re.I)
 
+# Token, die in einem PERSONEN-Namen nie vorkommen — verirrte Rechtsform-/
+# Platzhalter-Fragmente, die der Scraper als „Name" abgreift („… Inc", „Firmenname B2B").
+_MULL_NAME_HART_TOKENS = frozenset({"inc", "b2b", "firmenname", "musterfirma"})
+
+# Akademische Titel-/Grad-Fragmente. Stehen sie OHNE echten Vor-+Nachnamen dahinter
+# (z. B. „Parmentier Dipl"), ist der „Name" nur ein Titelrest = Artefakt.
+_NAME_TITEL = frozenset({"dipl", "ing", "dr", "prof", "mba", "msc", "bsc", "llm", "phd", "med"})
+
+# ─── Firmenname-/Domain-Artefakte (Schritt-3-Erweiterung) ───────────────────
+# Harte Platzhalter: tauchen sie im Firmennamen auf, ist es kein echter Betrieb.
+_FIRMA_HART_PLATZHALTER = frozenset({
+    "firmenname", "musterfirma", "mustermann", "musterfrau", "beispielfirma",
+    "amercia", "yourcompany", "yourdomain", "testfirma", "deinefirma", "ihrefirma",
+})
+# Rechtsform-Suffixe — beim Inhalts-Check ignoriert (sonst zählt „GmbH" als Inhalt).
+_FIRMA_SUFFIXE = frozenset({
+    "inc", "gmbh", "ag", "kg", "ohg", "ug", "mbh", "co", "ltd", "llc", "kgaa",
+    "se", "ev", "eg", "gbr", "und", "the",
+})
+# Junk-Inhalts-Token: besteht ein Firmenname NUR daraus, ist er ein Platzhalter
+# („B2B", „Firmenname B2B", „Test"). Ein echter Name hat mindestens ein anderes Wort.
+_FIRMA_JUNK = _FIRMA_HART_PLATZHALTER | frozenset({
+    "b2b", "test", "muster", "beispiel", "example", "demo", "platzhalter",
+})
+
+# Platzhalter-/Demo-Domains — eine Website, die so aussieht, ist keine echte Firma.
+_PLATZHALTER_DOMAIN_TOKENS = (
+    "yourdomain", "example.", "example-", "musterfirma", "mustermann", "musterfrau",
+    "beispiel", "company.com", "firmenname", "test.de", "domain.de", "ihre-domain",
+    "ihredomain", "deine-domain", "platzhalter",
+)
+
 
 def _ist_mull_name(name: str) -> bool:
     """True wenn `name` offensichtlich kein Personenname ist.
 
     Konservativ: lieber einen echten Namen behalten als fälschlich entfernen.
-    Prüft: bekannte Tech-/Firmennamen, Rechtstextfragmente, Ziffern, Überlänge.
+    Prüft: bekannte Tech-/Firmennamen, Rechtstextfragmente, Ziffern, Überlänge,
+    verirrte Rechtsform-/Platzhalter-Token und alleinstehende akademische Titel.
     """
     if not name:
         return False
@@ -111,9 +144,50 @@ def _ist_mull_name(name: str) -> bool:
         return True
     if _MULL_RECHT_RE.search(n):
         return True
-    if set(nl.split()) & _MULL_NAME_TOKENS:
+    woerter = [w for w in re.split(r"[^a-zA-ZäöüÄÖÜß]+", nl) if w]
+    wortmenge = set(woerter)
+    if wortmenge & _MULL_NAME_TOKENS:
+        return True
+    if wortmenge & _MULL_NAME_HART_TOKENS:        # „… Inc" / „Firmenname B2B"
+        return True
+    # Titelrest ohne echten Namen (z. B. „Parmentier Dipl"): bleiben nach Abzug der
+    # akademischen Titel < 2 echte Namens-Token, ist es ein Artefakt — ein echter
+    # Name wie „Dr. Hans Müller" behält Hans + Müller und bleibt erhalten.
+    if wortmenge & _NAME_TITEL:
+        echt = [w for w in woerter if w not in _NAME_TITEL and len(w) >= 2]
+        if len(echt) < 2:
+            return True
+    return False
+
+
+def _firma_tokens(name: str) -> set[str]:
+    # Ziffern BLEIBEN im Token (sonst zerfällt „B2B"→„b" und „3M"→„m") — so bleibt
+    # „B2B" als Junk erkennbar und „3M Deutschland" als echte Firma erhalten.
+    return {w for w in re.split(r"[^a-z0-9äöüß]+", (name or "").lower()) if w}
+
+
+def _ist_mull_firma(name: str) -> bool:
+    """True wenn `name` kein echter Firmenname ist (Platzhalter/Artefakt).
+
+    Konservativ — ein echter Betrieb mit Ziffer (z. B. „3M Deutschland") oder
+    Rechtsform bleibt erhalten. Greift nur bei harten Platzhaltern oder wenn der
+    Name AUSSCHLIESSLICH aus Junk-Token besteht (z. B. „B2B", „Firmenname B2B").
+    """
+    toks = _firma_tokens(name)
+    if not toks:
+        return False
+    if toks & _FIRMA_HART_PLATZHALTER:
+        return True
+    inhalt = toks - _FIRMA_SUFFIXE          # echte Inhalts-Token ohne Rechtsform
+    if inhalt and inhalt <= _FIRMA_JUNK:
         return True
     return False
+
+
+def _ist_platzhalter_domain(text: str) -> bool:
+    """True wenn die Website/Domain wie ein Demo-/Platzhalter aussieht."""
+    u = (text or "").strip().lower()
+    return bool(u) and any(tok in u for tok in _PLATZHALTER_DOMAIN_TOKENS)
 
 
 # ─── Rollen-/Sammel-Postfächer ──────────────────────────────────────────────
@@ -184,6 +258,14 @@ def _ein_lead(lead: dict, stats: dict, telefon_sucher, person_sucher=None) -> No
         if val and _ist_mull_name(val):
             lead[feld] = ""
             stats["mull_namen_bereinigt"] += 1
+
+    # 0b) Firmenname-/Domain-Artefakt FLAGGEN (nicht löschen — ein Firmenname ist zu
+    #     wertvoll zum Leeren). Das Premium-Gate verwertet das Flag für REJECT.
+    firma = (lead.get("company_name") or lead.get("company_name_clean") or "").strip()
+    if (firma and _ist_mull_firma(firma)) or _ist_platzhalter_domain(lead.get("website") or ""):
+        if not lead.get("company_name_artefakt"):
+            lead["company_name_artefakt"] = True
+            stats["firma_artefakt"] += 1
 
     # 0.5) Entscheider-Anreicherung (OPT-IN, KOSTENPFLICHTIG). Läuft NUR, wenn ein
     #     person_sucher injiziert wurde (= API-Key gesetzt → sonst None = 0 €) UND
@@ -353,7 +435,7 @@ def anreichern(leads: list[dict], *, telefon_sucher=None, person_sucher=None) ->
     """
     stats = {
         "telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0,
-        "mull_namen_bereinigt": 0, "person_angereichert": 0,
+        "mull_namen_bereinigt": 0, "person_angereichert": 0, "firma_artefakt": 0,
     }
     for lead in leads or []:
         try:

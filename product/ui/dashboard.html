@@ -1697,6 +1697,35 @@ function emptyState(icon, title, sub) {
   </div>`;
 }
 
+// ─── Sitzungs-Schutz: 401 sichtbar machen statt stumm leer zu rendern ──────
+// Vorher: ein abgelaufenes/fehlendes Login ließ JEDEN /api-Aufruf mit 401
+// zurückkommen; die Render-Funktionen lasen dann ein leeres Objekt und zeigten
+// kommentarlos „nichts" (Signal-Leads schienen weg, „↻ Aktualisieren" wirkte
+// tot). Jetzt fängt ein fetch-Wrapper jeden 401 zentral ab, zeigt einen klaren
+// Hinweis und leitet zur Anmeldung — einmalig, ohne Endlosschleife.
+let _sessionWeg = false;
+function _sitzungAbgelaufen() {
+  if (_sessionWeg) return;
+  _sessionWeg = true;
+  try { if (typeof _autoRefresh !== 'undefined' && _autoRefresh) clearInterval(_autoRefresh); } catch (_) {}
+  try { if (typeof _signalPollTimer !== 'undefined' && _signalPollTimer) clearTimeout(_signalPollTimer); } catch (_) {}
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;'
+    + 'color:#fff;padding:14px 18px;font:600 14px/1.4 system-ui,sans-serif;text-align:center;'
+    + 'box-shadow:0 2px 8px rgba(0,0,0,.3)';
+  bar.textContent = '🔒 Sitzung abgelaufen — du wirst zur Anmeldung weitergeleitet…';
+  (document.body || document.documentElement).appendChild(bar);
+  setTimeout(function () { location.href = '/login'; }, 1400);
+}
+(function () {
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = async function (...args) {
+    const r = await _origFetch(...args);
+    if (r && r.status === 401) _sitzungAbgelaufen();
+    return r;
+  };
+})();
+
 // ─── Init ─────────────────────────────────────────────────────────────────
 laden();
 ladenAngebote();   // füllt das globale Angebot-Dropdown im Header (Admin)
@@ -1927,8 +1956,8 @@ function renderAuftragForm() {
       </div>
       <form id="formAuftrag" onsubmit="auftragStarten(event)">
         <div class="setup-form-row">
-          <label class="setup-label">Zielgruppe / Branche</label>
-          <input type="text" class="setup-input" id="auf_zielgruppe" value="${vBranche}" placeholder="z. B. Handwerker, IT-Dienstleister" required>
+          <label class="setup-label">Zielbranche</label>
+          <input type="text" class="setup-input" id="auf_zielgruppe" value="${vBranche}" placeholder="echte Branche, z. B. Maschinenbau, IT-Dienstleister — NICHT &bdquo;Vertrieb&ldquo;" required>
         </div>
         <div class="setup-form-row">
           <label class="setup-label" id="lblRegion">Region / Ort</label>
@@ -2058,6 +2087,17 @@ async function signalSucheStarten() {
   ).map(c => c.value);
   if (_suchModus === 'signal' && signale.length === 0) {
     msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ Bitte mindestens ein Kaufsignal auswählen.</div>`;
+    btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
+    return;
+  }
+  // Intake-Trennung: die Zielbranche darf kein Rollen-/Signalwort sein („Vertrieb"
+  // matcht jede Firma → weiche Ausgabe). Sofort-Feedback; der Server prüft erneut.
+  const _zb = document.getElementById('auf_zielgruppe').value.trim();
+  const _ROLLEN = ['vertrieb','vertriebler','vertriebsmitarbeiter','sales','salesmanager','verkauf','verkäufer','verkaeufer','akquise','akquisition','kaltakquise','neukundengewinnung','sdr','bdr','terminierer','terminierung','außendienst','aussendienst','innendienst','telesales','telefonakquise','closer','setter','manager','leiter','leitung','mitarbeiter','account','accountmanager'];
+  const _zbToks = _zb.toLowerCase().split(/[^a-zäöüß0-9]+/)
+    .filter(t => t && !['in','im','für','fuer','und','der','die','das','mit','b2b','b2c','bereich','team'].includes(t));
+  if (_suchModus === 'signal' && _zbToks.length && _zbToks.every(t => _ROLLEN.includes(t))) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ &bdquo;${esc(_zb)}&ldquo; ist ein Signal/eine Rolle, keine Branche. Bitte die <b>Zielbranche</b> angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk) — das Kaufsignal wählst du über die Checkboxen.</div>`;
     btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
     return;
   }

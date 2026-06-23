@@ -184,6 +184,57 @@ def test_anreichern_behaelt_echte_namen():
     assert lead["contact_full_name"] == "Angela Bisping"
 
 
+# ─── Schritt 3: erweiterte Artefakt-Erkennung (Name/Firma/Domain) ────────────
+
+def test_mull_name_titelrest_ohne_namen():
+    # „Parmentier Dipl" = Titelrest ohne echten Vor-+Nachnamen → Artefakt.
+    assert ce._ist_mull_name("Parmentier Dipl") is True
+
+
+def test_mull_name_echter_titel_bleibt():
+    # „Dr. Hans Müller" / „Dipl.-Ing. Anna Schmidt" haben echten Namen → behalten.
+    assert ce._ist_mull_name("Dr. Hans Müller") is False
+    assert ce._ist_mull_name("Dipl.-Ing. Anna Schmidt") is False
+
+
+def test_mull_name_verirrte_rechtsform_token():
+    assert ce._ist_mull_name("Firmenname B2B") is True
+    assert ce._ist_mull_name("Amercia Inc") is True
+
+
+def test_mull_firma_platzhalter():
+    assert ce._ist_mull_firma("Amercia Inc") is True
+    assert ce._ist_mull_firma("Firmenname B2B") is True
+    assert ce._ist_mull_firma("B2B") is True
+    assert ce._ist_mull_firma("Musterfirma GmbH") is True
+
+
+def test_mull_firma_echte_firma_bleibt():
+    for f in ("Echte Maschinenbau GmbH", "3M Deutschland GmbH", "ACME B2B Solutions GmbH",
+              "Streif Haus GmbH", "ISGUS GmbH"):
+        assert ce._ist_mull_firma(f) is False, f
+
+
+def test_platzhalter_domain():
+    assert ce._ist_platzhalter_domain("https://info.yourdomain.com") is True
+    assert ce._ist_platzhalter_domain("https://example.com") is True
+    assert ce._ist_platzhalter_domain("https://www.echte-firma.de") is False
+    assert ce._ist_platzhalter_domain("") is False
+
+
+def test_anreichern_flaggt_firma_artefakt():
+    leads = [
+        {"company_name": "Amercia Inc", "website": "https://x.de", "email": "info@x.de"},
+        {"company_name": "Gute Firma GmbH", "website": "https://info.yourdomain.com", "email": "info@x.de"},
+        {"company_name": "Echte Maschinenbau GmbH", "website": "https://echt.de", "email": "info@x.de"},
+    ]
+    stats = ce.anreichern(leads)
+    assert leads[0].get("company_name_artefakt") is True      # Artefakt-Firmenname
+    assert leads[1].get("company_name_artefakt") is True      # Platzhalter-Domain
+    assert not leads[2].get("company_name_artefakt")          # sauber
+    assert stats["firma_artefakt"] == 2
+
+
 # ─── _domain: Domain aus Website ─────────────────────────────────────────────
 
 def test_domain_aus_website():

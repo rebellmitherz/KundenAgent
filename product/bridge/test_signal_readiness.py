@@ -54,9 +54,29 @@ def test_unbekanntes_signal_default_staerke():
 
 
 def test_persoenliche_vs_sammelmail():
-    assert r._hat_persoenliche_mail("anna.b@firma.de") is True
+    # Klares vorname.nachname-Muster → persönlich.
+    assert r.ist_persoenliche_mail("max.mustermann@firma.de") is True
+    assert r.ist_persoenliche_mail("andrea.schmidt@firma.de") is True
+    # Sammel-/Rollen-Postfächer → NIE persönlich (auch mit Trenner/Region/Ziffern).
+    for sammel in ("info@firma.de", "kontakt@firma.de", "vertrieb@firma.de",
+                   "bewerbung@firma.de", "info.berlin@firma.de", "info.de@firma.de",
+                   "de.contact@firma.de", "datenschutz@firma.de", "noreply@firma.de"):
+        assert r.ist_persoenliche_mail(sammel) is False, sammel
+    # firstname.initial: nur mit bekanntem Ansprechpartner sicher persönlich,
+    # sonst konservativ (lieber kein Etikett als ein falsches).
+    assert r.ist_persoenliche_mail("anna.b@firma.de") is False
+    assert r.ist_persoenliche_mail("anna.b@firma.de", "Anna Bauer") is True
+    # Bloßer Vorname / Kürzel ohne Namensbeleg → nicht persönlich.
+    assert r.ist_persoenliche_mail("markus@firma.de") is False
+    assert r.ist_persoenliche_mail("t.online@firma.de") is False
+    assert r.ist_persoenliche_mail("") is False
+    # Rückwärtskompatibler Alias.
     assert r._hat_persoenliche_mail("info@firma.de") is False
-    assert r._hat_persoenliche_mail("") is False
+    # Mobilnummer-Erkennung (DE-Mobilfunk = Direktkontakt, Festnetz/Ausland nicht).
+    assert r.ist_mobilnummer("0171 1234567") is True
+    assert r.ist_mobilnummer("+49 151 1234567") is True
+    assert r.ist_mobilnummer("030 1234567") is False
+    assert r.ist_mobilnummer("") is False
 
 
 def test_frische_senkt_altes_signal():
@@ -121,6 +141,57 @@ def test_stapel_bonus_gedeckelt_und_geklemmt():
                         "signale": ["appointment_setter", "sales_hiring", "growth_expansion",
                                     "marketing_hiring", "new_location"]})
     assert fuenf["score"] <= 100                              # nie über 100
+
+
+# ── Schritt 2: Engine-Härtung (Deckelung) ──────────────────────────────────
+def test_ready_to_send_no_deckelt_auf_mittel():
+    # Heißes Signal + voller Kontakt = wäre „hoch", aber Engine sagt nicht sendefähig.
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, email="anna.bauer@firma.de", phone="0171 1234567",
+              ready_to_send="no", ready_to_send_block_reason="email_quality_review_required")
+    res = r.bewerten(l)
+    assert res["stufe"] != r.HOCH, res            # nie „hoch"
+    assert res["score"] <= 60
+    assert any("sendefähig" in g.lower() for g in res["gruende"]), res["gruende"]
+
+
+def test_ready_to_send_yes_bleibt_unangetastet():
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, email="anna.bauer@firma.de", phone="0171 1234567",
+              ready_to_send="yes")
+    res = r.bewerten(l)
+    assert res["stufe"] == r.HOCH, res            # gutes Urteil bleibt hoch
+
+
+def test_do_not_contact_macht_niedrig():
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, phone="0171 1234567", do_not_contact=True)
+    res = r.bewerten(l)
+    assert res["stufe"] == r.NIEDRIG and res["score"] <= 25, res
+    assert any("do_not_contact" in g.lower() for g in res["gruende"])
+
+
+def test_fake_mail_rang_senkt_score():
+    gut = r.bewerten(_lead(email_quality_rank="A"))
+    fake = r.bewerten(_lead(email_quality_rank="D"))
+    assert fake["score"] < gut["score"], (fake["score"], gut["score"])
+    assert any("rang d" in g.lower() for g in fake["gruende"]), fake["gruende"]
+
+
+def test_rollenmail_ohne_telefon_nie_hoch():
+    # info@ + kein Telefon: selbst bei heißem Signal/hohem Fit max. mittel.
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, email="info@firma.de", phone="")
+    res = r.bewerten(l)
+    assert res["stufe"] != r.HOCH, res
+
+
+def test_haertung_ohne_enginefelder_unveraendert():
+    # Ohne ready_to_send/Rang/do_not_contact ändert sich nichts (Rückwärtskompat).
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, email="anna.bauer@firma.de", phone="0171 1234567")
+    res = r.bewerten(l)
+    assert res["stufe"] == r.HOCH and res["score"] >= 70, res
 
 
 def _run_all():

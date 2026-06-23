@@ -123,6 +123,35 @@ def test_fit_bewerten_neues_signal_appointment_setter():
     assert score >= 0.6 and status in ("target_fit", "maybe_fit"), (score, status)
 
 
+# ─── Schritt 5: Zielbranche vom Signal trennen ──────────────────────────────
+def test_ist_rollenwort_erkennt_rollen():
+    for r in ("Vertrieb", "vertrieb", "Sales", "Außendienst", "Kaltakquise",
+              "SDR", "Sales Manager", "Vertrieb im B2B"):
+        assert sd.ist_rollenwort(r) is True, r
+
+
+def test_ist_rollenwort_echte_branche_false():
+    for b in ("Maschinenbau", "IT-Dienstleister", "Handwerk", "B2B-SaaS",
+              "Vertriebsberatung", "Steuerberater", "Marketing", "Logistik"):
+        assert sd.ist_rollenwort(b) is False, b
+
+
+def test_ist_rollenwort_leer_false():
+    assert sd.ist_rollenwort("") is False
+    assert sd.ist_rollenwort("   ") is False
+
+
+def test_fit_rollenwort_als_branche_kein_icp_credit():
+    # „Vertrieb" als Branche darf den ICP-Fit NICHT hochziehen (nur Signal zählt).
+    titel = "Vertriebsmitarbeiter Außendienst (m/w/d)"
+    als_branche = sd._fit_bewerten("Echte Firma GmbH", titel,
+                                   industry="Vertrieb", city="", signal_type="sales_hiring")[0]
+    echte_branche = sd._fit_bewerten("Echte Firma GmbH", "Maschinenbau " + titel,
+                                     industry="Maschinenbau", city="", signal_type="sales_hiring")[0]
+    # Mit echter, passender Branche ist der Fit höher als mit dem Rollenwort „Vertrieb".
+    assert echte_branche > als_branche, (echte_branche, als_branche)
+
+
 def test_discover_aus_cache():
     report = {
         "results": [

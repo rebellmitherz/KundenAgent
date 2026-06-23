@@ -34,12 +34,6 @@ class EngineBrueckenErgebnis:
     rohdaten: dict = field(default_factory=dict)
 
 
-# Sammel-Postfächer — eine persönliche Adresse ist mehr wert als info@.
-_GENERISCHE_MAIL_PREFIXES = (
-    "info", "kontakt", "mail", "office", "hello", "hallo", "post",
-    "contact", "service", "support", "willkommen", "anfrage",
-)
-
 
 def _website_bereinigt(url: str) -> str:
     """Tracking-Query (utm_*) aus der Website-URL fürs UI entfernen."""
@@ -47,6 +41,55 @@ def _website_bereinigt(url: str) -> str:
     if "?" in u and "utm_" in u.split("?", 1)[1].lower():
         return u.split("?", 1)[0]
     return u
+
+
+def _uebersuch_roh_ziel(ziel: int) -> int:
+    """Roh-Zielmenge fürs Über-Suchen: ein Vielfaches der bestellten Menge, damit
+    nach dem harten Premium-Gate genug echte Top-Leads übrig bleiben. Faktor + Cap
+    sind per Env steuerbar (Default 3×, gedeckelt bei 80 — schützt die Enrich-Zeit).
+    Faktor ≤ 1 schaltet das Über-Suchen ab (altes Verhalten)."""
+    try:
+        faktor = float(os.environ.get("SIGNAL_UEBERSUCH_FAKTOR", "3") or 3)
+    except (TypeError, ValueError):
+        faktor = 3.0
+    try:
+        cap = int(os.environ.get("SIGNAL_UEBERSUCH_MAX", "80") or 80)
+    except (TypeError, ValueError):
+        cap = 80
+    ziel = max(int(ziel or 0), 1)
+    return max(ziel, min(int(round(ziel * max(faktor, 1.0))), cap))
+
+
+def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
+                  nur_premium: bool = False) -> tuple[list[dict], dict]:
+    """Wendet das Premium-Gate auf die angereicherten Leads an und bestimmt die
+    Ausgabe nach der „über-suchen, dann hart filtern"-Politik:
+
+      • Jeder Lead bekommt ``premium_klasse`` + die Stufen-Deckelung (via Gate).
+      • **REJECT fliegt immer raus** (echter Müll: Fake-Domain/Artefakt/kein Kontakt/
+        do_not_contact/invalid Mail/ICP-Fehlschlag).
+      • Rest wird PREMIUM-zuerst sortiert; geliefert wird die Zielmenge der besten
+        (aber NIE weniger als alle vorhandenen PREMIUM-Leads).
+      • ``nur_premium`` (Env-Schalter) liefert ausschließlich PREMIUM.
+
+    Rückgabe: (ausgewählte Leads, Zählung {PREMIUM, REVIEW, REJECT}).
+    Rein deterministisch + ohne Netz → unter Test stellbar.
+    """
+    from product.bridge import premium_gate as _pg
+
+    zaehlung = _pg.anreichern(leads, zielbranche=zielbranche)
+    rang = {_pg.PREMIUM: 3, _pg.REVIEW: 2, _pg.REJECT: 1}
+
+    behalten = [l for l in leads if l.get("premium_klasse") != _pg.REJECT]
+    if nur_premium:
+        behalten = [l for l in behalten if l.get("premium_klasse") == _pg.PREMIUM]
+    behalten.sort(
+        key=lambda l: (rang.get(l.get("premium_klasse"), 0),
+                       int(l.get("kaufbereitschaft_score") or 0)),
+        reverse=True,
+    )
+    ziel_aus = max(int(ziel or 0), zaehlung.get(_pg.PREMIUM, 0), 1)
+    return behalten[:ziel_aus], zaehlung
 
 
 def _lead_begruendung(e: dict) -> tuple[list[str], str]:
@@ -64,20 +107,23 @@ def _lead_begruendung(e: dict) -> tuple[list[str], str]:
     elif score > 0:
         gruende.append(f"Schwache Passung (Score {score})")
 
+    # Persönlich/Mobil-Klassifizierung zentral aus signal_readiness (eine Wahrheit) —
+    # vermeidet, eine info@-Adresse fälschlich als „persönlich" auszuweisen.
+    from product.bridge.signal_readiness import ist_persoenliche_mail, ist_mobilnummer
+
     telefon = (e.get("phone") or e.get("contact_phone") or "").strip()
     if telefon:
-        gruende.append("Telefon vorhanden — direkt anrufbar")
+        gruende.append("Mobilnummer (Direktkontakt)" if ist_mobilnummer(telefon) else "Telefonnummer vorhanden")
 
     ansprechpartner = (e.get("contact_name") or "").strip()
     email = (e.get("email") or "").strip().lower()
     if ansprechpartner:
         gruende.append(f"Ansprechpartner: {ansprechpartner}")
     elif email:
-        prefix = email.split("@", 1)[0]
-        if prefix in _GENERISCHE_MAIL_PREFIXES:
-            gruende.append("Nur Sammel-Adresse (z. B. info@) — Anruf wirkt besser")
+        if ist_persoenliche_mail(email, ansprechpartner):
+            gruende.append("Persönliche E-Mail-Adresse")
         else:
-            gruende.append("Persönliche E-Mail-Adresse gefunden")
+            gruende.append("Nur Sammel-Adresse (z. B. info@) — Anruf wirkt besser")
 
     sendbar = (e.get("ready_to_send") or "").strip().lower() == "yes"
     if sendbar:
@@ -300,7 +346,10 @@ class EngineBridge:
             ziel = max(int(auftrag.lead_anzahl), 1)
         except (TypeError, ValueError):
             ziel = 10
-        disc_queries = min(max(ziel + 4, 10), 30)
+        # Über-Suchen (Premium-Gate, Schritt 4): roh ein Vielfaches der Zielmenge
+        # holen, damit nach dem harten Gate genug echte Top-Leads übrig bleiben.
+        roh_ziel = _uebersuch_roh_ziel(ziel)
+        disc_queries = min(max(roh_ziel + 4, 10), 30)
 
         such_diag: dict = {}
         try:
@@ -309,7 +358,7 @@ class EngineBridge:
                 industry=auftrag.zielgruppe,
                 city=auftrag.region,
                 signal_types=signal_typen,
-                max_companies=ziel,
+                max_companies=roh_ziel,
                 cached_report=cached_report,
                 laender=laender,
                 max_queries=disc_queries,
@@ -381,6 +430,19 @@ class EngineBridge:
         # Kaufbereitschafts-Analyse (1k-Produkt): je Lead Score + Stufe + Gründe +
         # Beleg aus den vorhandenen Feldern verdichten (deterministisch, kein Netz).
         self._signal_readiness_bewerten(leads)
+        # PREMIUM-GATE (Schritt 4): die harte Qualitäts-Schranke VOR der Ausgabe.
+        # „sauber" = besteht das Gate (ersetzt die alte Schwelle contact_quality≥40).
+        # REJECT fliegt raus, PREMIUM zuerst, geliefert wird die Zielmenge der besten —
+        # so wird vor der teuren Personalisierung schon hart gefiltert.
+        _nur_premium = str(os.environ.get("SIGNAL_NUR_PREMIUM", "") or "").strip().lower() \
+            in ("1", "true", "yes", "ja")
+        _vor_gate = len(leads)
+        leads, gate_zaehlung = _gate_ausgabe(
+            leads, ziel=ziel, zielbranche=auftrag.zielgruppe, nur_premium=_nur_premium)
+        print(
+            f"[signal] Premium-Gate: PREMIUM={gate_zaehlung.get('PREMIUM', 0)} "
+            f"REVIEW={gate_zaehlung.get('REVIEW', 0)} REJECT={gate_zaehlung.get('REJECT', 0)} "
+            f"→ {len(leads)} ausgegeben (von {_vor_gate}).", flush=True)
         # Verkaufspsychologische Personalisierung — NUR hier (Signal-Suche):
         # je Lead einen Aufhänger ans Lead-Feld heften + Vorschau-Mail rendern.
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
@@ -410,11 +472,14 @@ class EngineBridge:
         # Heißgrad: wie viele Leads haben MEHR als ein Signal (Stapelungs-Nutzen).
         mehrfach = sum(1 for l in leads if int(l.get("signal_count") or 0) >= 2)
         zusatz = f", davon {mehrfach} mit mehreren Signalen" if len(signal_typen) > 1 else ""
+        premium_n = gate_zaehlung.get("PREMIUM", 0)
         return EngineBrueckenErgebnis(
             ok=True,
             leads_gefunden=len(leads),
-            leads_sauber=sum(1 for l in leads if int(l.get("contact_quality_score") or 0) >= 40),
-            meldung=f"Signal-Suche abgeschlossen: {len(leads)} Leads, {mit_signal} mit Signal{zusatz}.",
+            # „sauber" = besteht das Premium-Gate (statt der weichen contact_quality≥40).
+            leads_sauber=premium_n,
+            meldung=(f"Signal-Suche abgeschlossen: {len(leads)} Leads ausgegeben "
+                     f"({premium_n} Premium), {mit_signal} mit Signal{zusatz}."),
             rohdaten={
                 "leads": leads,
                 "discovery": [f.als_dict() for f in firmen],

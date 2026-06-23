@@ -679,13 +679,22 @@ class _Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             anzahl = 0
 
-        from product.bridge.signal_discovery import SIGNAL_TYPES
+        from product.bridge.signal_discovery import SIGNAL_TYPES, ist_rollenwort
         unbekannt = [s for s in signale if s not in SIGNAL_TYPES]
         if unbekannt:
             self._json({"ok": False, "meldung": f"Unbekannter Signaltyp: {', '.join(unbekannt)}"})
             return
         if not zielgruppe:
-            self._json({"ok": False, "meldung": "Zielgruppe (Branche) ist Pflicht."})
+            self._json({"ok": False, "meldung": "Zielbranche ist Pflicht."})
+            return
+        # Intake-Trennung (Premium-Gate, Schritt 5): die ZIELBRANCHE muss eine echte
+        # Branche sein, kein Signal/keine Rolle. „Vertrieb" als Branche matcht jede
+        # Firma → genau das macht die Ausgabe weich. Das Kaufsignal wählt man separat.
+        if ist_rollenwort(zielgruppe):
+            self._json({"ok": False, "meldung":
+                f"„{zielgruppe}“ ist ein Signal/eine Rolle, keine Branche. Bitte die "
+                "ZIELBRANCHE angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk, "
+                "B2B-SaaS) — das Kaufsignal wählst du darunter per Checkbox."})
             return
         if anzahl <= 0:
             self._json({"ok": False, "meldung": "Bitte eine Lead-Anzahl > 0 angeben."})
