@@ -367,6 +367,50 @@ def test_apify_pro_ohne_key_ist_leer_und_kostenlos():
     assert sd._apify_pro_firmen("Vertrieb", "Berlin", "sales_hiring", api_key="") == []
 
 
+def test_linkedin_such_url_format():
+    # Eingabeformat des curious_coder-Actors: LinkedIn-Jobs-Such-URL.
+    u_de = sd._linkedin_such_url("Vertriebsmitarbeiter", "", ["de"])
+    assert "linkedin.com/jobs/search" in u_de
+    assert "keywords=Vertriebsmitarbeiter" in u_de
+    assert "location=Germany" in u_de            # ohne Stadt → Land
+    u_at = sd._linkedin_such_url("SDR", "", ["at"])
+    assert "location=Austria" in u_at
+    u_city = sd._linkedin_such_url("SDR", "Hamburg", ["de"])
+    assert "location=Hamburg" in u_city          # mit Stadt → Stadt
+
+
+# ─── Such-Transparenz (Operator-Coverage) ────────────────────────────────────
+
+def test_quellen_namen_listet_portale_und_linkedin():
+    q = sd.quellen_namen(["de"], linkedin_web=True)
+    for name in ("Stepstone", "Indeed", "Kimeta", "Jobvector", "LinkedIn-Web"):
+        assert name in q, name
+    assert "LinkedIn-Pro" not in q          # Pro nur wenn linkedin_pro=True
+    assert sd.quellen_namen(["de"], linkedin_pro=True)[-1] == "LinkedIn-Pro"
+
+
+def test_discover_multi_signal_fuellt_diagnostik():
+    rep = {"results": [
+        {"company_name": "Alpha GmbH", "company_name_valid": True, "title": "Sales Manager", "url": "https://stepstone.de/j1"},
+        {"company_name": "Beta GmbH", "company_name_valid": True, "title": "SDR Terminierung", "url": "https://stepstone.de/j2"},
+    ]}
+    import os
+    fd, path = tempfile.mkstemp(suffix=".json"); os.close(fd)
+    Path(path).write_text(json.dumps(rep), encoding="utf-8")
+    orig = sd.resolve_website
+    sd.resolve_website = lambda *a, **k: ("https://x.de", 0.9)
+    diag: dict = {}
+    try:
+        sd.discover_multi_signal("b2bbot", "Handel", "", ["sales_hiring", "appointment_setter"],
+                                 max_companies=10, cached_report=path, diagnostik=diag)
+    finally:
+        sd.resolve_website = orig
+        Path(path).unlink()
+    assert diag["signale"] == ["sales_hiring", "appointment_setter"]
+    assert set(diag["pro_signal"]) == {"sales_hiring", "appointment_setter"}
+    assert diag["quellen"] and "Stepstone" in diag["quellen"]
+
+
 def test_resolve_candidates_paart_korrekt_und_parallel():
     cands = [{"url": f"u{i}", "title": f"t{i}"} for i in range(6)]
 

@@ -302,6 +302,7 @@ class EngineBridge:
             ziel = 10
         disc_queries = min(max(ziel + 4, 10), 30)
 
+        such_diag: dict = {}
         try:
             firmen = _sd.discover_multi_signal(
                 self.engine_dir,
@@ -315,6 +316,7 @@ class EngineBridge:
                 max_results_per_query=5,
                 linkedin_web=linkedin_web,
                 linkedin_pro=linkedin_pro,
+                diagnostik=such_diag,
             )
         except Exception as exc:  # noqa: BLE001
             kurz = f"Signal-Discovery fehlgeschlagen: {exc}"
@@ -384,8 +386,25 @@ class EngineBridge:
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
         # kippen — ohne Key/Signal bleibt es eine saubere generische Mail.
         self._signal_leads_personalisieren(leads)
+
+        # Such-Coverage-Report (Transparenz fürs Operator-UI): durchsuchte Quellen,
+        # Roh-Treffer je Signal (aus der Discovery) + finale Lead-Verteilung je Signal.
+        from product.bridge.signal_discovery import SIGNAL_LABELS as _LBL
+        final_mix: dict[str, int] = {}
+        for l in leads:
+            st = (l.get("entdeckt_per_signal") or "").strip().lower()
+            if st:
+                final_mix[st] = final_mix.get(st, 0) + 1
+        such_report = {
+            "quellen": such_diag.get("quellen", []),
+            "signale": [_LBL.get(s, s) for s in signal_typen],
+            "treffer_je_signal": {_LBL.get(k, k): v for k, v in (such_diag.get("pro_signal") or {}).items()},
+            "leads_je_signal": {_LBL.get(k, k): v for k, v in final_mix.items()},
+            "linkedin_web": bool(linkedin_web),
+            "linkedin_pro": bool(linkedin_pro),
+        }
         self._signal_leads_schreiben(leads, auftrag, signal_typ_label, laender,
-                                     signal_typen=signal_typen)
+                                     signal_typen=signal_typen, such_report=such_report)
 
         mit_signal = sum(1 for l in leads if l.get("entdeckt_per_signal"))
         # Heißgrad: wie viele Leads haben MEHR als ein Signal (Stapelungs-Nutzen).
@@ -401,6 +420,7 @@ class EngineBridge:
                 "discovery": [f.als_dict() for f in firmen],
                 "signal_typ": signal_typ_label,
                 "signal_typen": signal_typen,
+                "such_report": such_report,
             },
         )
 
@@ -526,7 +546,7 @@ class EngineBridge:
 
     def _signal_leads_schreiben(
         self, leads: list[dict], auftrag: Auftrag, signal_typ: str, laender=("de",),
-        *, signal_typen: Optional[list] = None,
+        *, signal_typen: Optional[list] = None, such_report: Optional[dict] = None,
     ) -> Path:
         """Schreibt die Signal-Leads. Zwei Ziele:
         1) ``signal_leads.json`` = letzter Lauf (Kompatibilität: der CRM-Connector
@@ -544,6 +564,7 @@ class EngineBridge:
             "laender": list(laender or []),
             "signal_typ": signal_typ,
             "signal_typen": typen,
+            "such_report": such_report or {},
             "anzahl": len(leads),
             "mit_signal": sum(1 for l in leads if l.get("entdeckt_per_signal")),
             "leads": leads,
@@ -562,6 +583,7 @@ class EngineBridge:
                     "laender": list(laender or []),
                     "signal_typ": signal_typ,
                     "signal_typen": typen,
+                    "such_report": such_report or {},
                     "label": _store.run_label({**payload}),
                 },
                 leads=leads,
@@ -685,6 +707,7 @@ class EngineBridge:
                 "region": r.get("region", ""),
                 "laender": r.get("laender", []),
                 "signal_typ": r.get("signal_typ", ""),
+                "such_report": r.get("such_report", {}),
                 "generated_at": r.get("generated_at", ""),
                 "anzahl": len(leads),
                 "leads": leads,

@@ -376,6 +376,34 @@ def _portal_templates_fuer(laender) -> list[str]:
     return list(dict.fromkeys(tmpl))
 
 
+# Portal-Domain → Anzeigename (für die Such-Coverage-Zeile im Operator-UI).
+_QUELLE_ANZEIGE: list[tuple[str, str]] = [
+    ("stepstone", "Stepstone"), ("indeed", "Indeed"), ("yourfirm", "Yourfirm"),
+    ("meinestadt", "meinestadt"), ("jobware", "Jobware"), ("monster", "Monster"),
+    ("stellenanzeigen", "Stellenanzeigen.de"), ("kimeta", "Kimeta"), ("jobvector", "Jobvector"),
+    ("personio", "Personio"), ("join.com", "Join"), ("lever", "Lever"),
+    ("greenhouse", "Greenhouse"), ("karriere.at", "karriere.at"), ("jobs.ch", "jobs.ch"),
+    ("jobscout24", "JobScout24"),
+]
+
+
+def quellen_namen(laender, *, linkedin_web: bool = False, linkedin_pro: bool = False) -> list[str]:
+    """Lesbare Liste aller durchsuchten Quellen (Portale + ggf. LinkedIn) — für die
+    Such-Transparenz im Operator-UI. Spiegelt die echten Portal-Templates."""
+    blob = " ".join(_portal_templates_fuer(laender)).lower()
+    namen: list[str] = []
+    for marker, name in _QUELLE_ANZEIGE:
+        if marker in blob and name not in namen:
+            namen.append(name)
+    # freie Google-Suche (Karriereseiten) ist immer dabei
+    namen.append("Karriereseiten (frei)")
+    if linkedin_web:
+        namen.append("LinkedIn-Web")
+    if linkedin_pro:
+        namen.append("LinkedIn-Pro")
+    return namen
+
+
 # Such-Keywords für sales/growth, wenn der Engine-Builder nicht greift (z. B.
 # ohne Stadt oder außerhalb DE) — damit alle Signaltypen länderweit funktionieren.
 # WICHTIG: Deutsche Begriffe ZUERST — die äußere Schleife iteriert Keywords, die
@@ -544,18 +572,35 @@ def _linkedin_web_firmen(
     return firmen[:max_companies]
 
 
+# Land → LinkedIn-Location-Name (fuer die Such-URL).
+_LI_LAND_LOCATION = {"de": "Germany", "at": "Austria", "ch": "Switzerland"}
+
+# Default-Actor: curious_coder/linkedin-jobs-scraper (von Emilio bestaetigt,
+# ~$1 / 1.000 Results, liefert Firmendetails). Per APIFY_LINKEDIN_ACTOR wechselbar.
+_APIFY_ACTOR_DEFAULT = "curious_coder~linkedin-jobs-scraper"
+
+
+def _linkedin_such_url(keyword: str, city: str, laender) -> str:
+    """Baut eine LinkedIn-Jobs-Such-URL (genau das Eingabeformat des Apify-Actors)."""
+    import urllib.parse as _up
+    lnd = _laender_normalisieren(laender)
+    location = (city or "").strip() or _LI_LAND_LOCATION.get(lnd[0], "Germany")
+    q = _up.urlencode({"keywords": keyword, "location": location})
+    return f"https://www.linkedin.com/jobs/search/?{q}&position=1&pageNum=0"
+
+
 def _apify_pro_firmen(
     industry: str, city: str, signal_type: str, *,
-    max_companies: int = 10, api_key: str = "",
+    max_companies: int = 10, api_key: str = "", laender=("de",),
 ) -> list["SignalFirma"]:
     """OPT-IN LinkedIn-Pro via Apify (KOSTET GELD, AUS per Default).
 
-    Feuert nur, wenn ``APIFY_API_KEY`` gesetzt ist. Liefert strukturierte Job-Daten
-    inkl. Datum (→ speist die Signal-Frische). Actor via ``APIFY_LINKEDIN_ACTOR``
-    überschreibbar. Defensiv: jeder Fehler → [] (Suche läuft ohne LinkedIn-Pro weiter).
-
-    HINWEIS: bis Emilio einen Key hinterlegt + einen Live-Lauf macht, ist dieser
-    Pfad ungetestet — bewusst als Gerüst gebaut, das ohne Key 0 € kostet.
+    Feuert nur, wenn ``APIFY_API_KEY`` gesetzt ist. Verdrahtet auf das Schema von
+    ``curious_coder/linkedin-jobs-scraper``: Eingabe = LinkedIn-Such-URL(s) +
+    ``scrapeCompany``. Liefert Firma + Titel + Job-URL + Datum (→ Signal-Frische),
+    teils direkt die Firmen-Website (spart eine SERPER-Aufloesung). Actor via
+    ``APIFY_LINKEDIN_ACTOR`` wechselbar (z. B. ein Pay-Per-Result-Actor).
+    Defensiv: jeder Fehler → [] (Suche laeuft ohne LinkedIn-Pro weiter, 0 €).
     """
     api_key = (api_key or "").strip()
     if not api_key:
@@ -564,22 +609,25 @@ def _apify_pro_firmen(
     import urllib.request as _rq
     import urllib.error as _er
 
-    actor = os.environ.get("APIFY_LINKEDIN_ACTOR", "bebity~linkedin-jobs-scraper").strip()
+    actor = os.environ.get("APIFY_LINKEDIN_ACTOR", _APIFY_ACTOR_DEFAULT).strip() or _APIFY_ACTOR_DEFAULT
     kws = _keywords_fuer(signal_type)
-    suchbegriff = " ".join(p for p in [kws[0] if kws else "", industry] if p).strip() or "Vertrieb"
+    # Top-Keywords als je eine Such-URL (mehr Breite); Kosten ueber `count` gedeckelt.
+    such_urls = [_linkedin_such_url(kw, city, laender) for kw in kws[:2]] or \
+                [_linkedin_such_url("Vertrieb", city, laender)]
+    count = max(5, min(int(max_companies) if str(max_companies).isdigit() else 25, 50))
     payload = {
-        "title": suchbegriff,
-        "location": city or "Germany",
-        "rows": max(max_companies, 10),
-        "publishedAt": "",
+        "urls": such_urls,
+        "scrapeCompany": True,
+        "count": count,
+        "splitByLocation": False,
     }
     url = (f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
-           f"?token={api_key}&timeout=120")
+           f"?token={api_key}&timeout=240")
     try:
         req = _rq.Request(
             url, data=_json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST")
-        with _rq.urlopen(req, timeout=130) as resp:
+        with _rq.urlopen(req, timeout=250) as resp:
             items = _json.loads(resp.read().decode("utf-8"))
     except (_er.URLError, _er.HTTPError, TimeoutError, ValueError) as exc:
         print(f"[linkedin-pro] Apify fehlgeschlagen: {exc}", flush=True)
@@ -592,25 +640,43 @@ def _apify_pro_firmen(
     for it in items:
         if not isinstance(it, dict):
             continue
-        name = str(it.get("companyName") or it.get("company") or it.get("company_name") or "").strip()
+        # Firmenname — curious_coder liefert ihn unter verschiedenen Schluesseln,
+        # teils verschachtelt unter "companyDetails"/"company".
+        comp = it.get("companyDetails") if isinstance(it.get("companyDetails"), dict) else {}
+        name = str(
+            it.get("companyName") or it.get("company") or it.get("company_name")
+            or comp.get("name") or ""
+        ).strip()
         if not name:
             continue
         key = name.casefold().strip()
         if key in seen:
             continue
-        titel = str(it.get("title") or it.get("jobTitle") or "").strip()
-        quelle = str(it.get("jobUrl") or it.get("link") or it.get("url") or "").strip()
+        titel = str(it.get("title") or it.get("jobTitle") or it.get("positionName") or "").strip()
+        quelle = str(
+            it.get("jobUrl") or it.get("link") or it.get("url") or it.get("jobPostingUrl") or ""
+        ).strip()
         score, status = _fit_bewerten(name, titel, industry, city, signal_type)
         if status == "discard":
             continue
         seen.add(key)
-        datum = str(it.get("postedAt") or it.get("publishedAt") or it.get("postedTime") or "")
+        datum = str(
+            it.get("postedAt") or it.get("publishedAt") or it.get("postedTime")
+            or it.get("listedAt") or it.get("postedDate") or ""
+        )
         alter = _alter_aus_meta({"date": datum, "snippet": ""}, None, titel)
-        firmen.append(SignalFirma(
+        # Bonus: echte Firmen-Website direkt mitnehmen (kein linkedin.com), falls da.
+        web = str(it.get("companyWebsite") or comp.get("website") or "").strip()
+        if "linkedin.com" in web.lower():
+            web = ""
+        f = SignalFirma(
             firma=name, signal_titel=titel, quelle_url=quelle,
             fit_score=score, fit_status=status, signal_alter_tage=alter,
             signal_typ=signal_type,
-        ))
+        )
+        if web:
+            f.website = web
+        firmen.append(f)
     firmen.sort(key=lambda f: f.fit_score, reverse=True)
     return firmen[:max_companies]
 
@@ -844,7 +910,7 @@ def discover_companies(
     if linkedin_pro:
         firmen.extend(_apify_pro_firmen(
             industry, city, signal_type,
-            max_companies=max_companies,
+            max_companies=max_companies, laender=laender,
             api_key=os.environ.get("APIFY_API_KEY", "")))
 
     # nach Fit sortieren, dedupe nach Firmenname
@@ -1007,6 +1073,7 @@ def discover_multi_signal(
     max_results_per_query: int = 5,
     linkedin_web: bool = False,
     linkedin_pro: bool = False,
+    diagnostik: Optional[dict] = None,
 ) -> list[SignalFirma]:
     """Stapelung: Discovery über MEHRERE Signaltypen, vereint + heißgrad-sortiert.
 
@@ -1017,18 +1084,28 @@ def discover_multi_signal(
 
     ``linkedin_web``/``linkedin_pro`` werden je Signaltyp als zusätzliche QUELLE
     mitgesucht (gleicher Signaltyp → kein Doppelzählen beim Stapeln).
+
+    ``diagnostik`` (optional): wird mit der Such-Coverage befüllt — durchsuchte
+    Quellen + Roh-Treffer je Signal (für die Transparenz-Zeile im Operator-UI).
     """
     typen = [t for t in dict.fromkeys((s or "").strip().lower() for s in signal_types) if t]
     if not typen:
         typen = ["sales_hiring"]
+    if isinstance(diagnostik, dict):
+        diagnostik["quellen"] = quellen_namen(laender, linkedin_web=linkedin_web, linkedin_pro=linkedin_pro)
+        diagnostik["signale"] = list(typen)
+        diagnostik.setdefault("pro_signal", {})
     if len(typen) == 1:
         # Kein Stapelungs-Overhead bei nur einem Signal — exakt der alte Pfad.
-        return discover_with_websites(
+        firmen_einzel = discover_with_websites(
             engine_dir, industry, city, typen[0],
             max_companies=max_companies, provider=provider, cached_report=cached_report,
             laender=laender, max_queries=max_queries, max_results_per_query=max_results_per_query,
             linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
         )
+        if isinstance(diagnostik, dict):
+            diagnostik["pro_signal"][typen[0]] = len(firmen_einzel)
+        return firmen_einzel
 
     # Roh-Discovery je Signal — bewusst je Signal bis max_companies, damit die
     # Union genug Masse hat. Website-Auflösung ist hier noch AUS.
@@ -1044,6 +1121,8 @@ def discover_multi_signal(
         except Exception as exc:  # noqa: BLE001 — ein kaputtes Signal darf den Lauf nicht kippen
             print(f"[signal-stapelung] Signal {st!r} fehlgeschlagen: {exc}", flush=True)
             firmen = []
+        if isinstance(diagnostik, dict):
+            diagnostik["pro_signal"][st] = len(firmen)
         per_signal.append((st, firmen))
 
     vereint = _firmen_vereinen(per_signal)[:max_companies]

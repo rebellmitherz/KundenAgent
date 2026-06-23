@@ -2165,10 +2165,66 @@ function renderSignalLeads(d) {
         <button onclick="signalRunLoeschen('${esc(r.run_id)}')"
           style="background:none;border:1px solid var(--border);color:var(--text3);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap">🗑 Ganze Suche löschen</button>
       </div>
+      ${_suchReport(r.such_report)}
       <div class="leads-grid">${cards}</div>
     </div>`;
   }).join('');
   box.innerHTML = head + sections;
+}
+
+function _suchReport(rep) {
+  if (!rep || !(rep.quellen || rep.signale)) return '';
+  const quellen = rep.quellen || [];
+  const signale = rep.signale || [];
+  const eintraege = o => Object.keys(o || {}).map(k => `${esc(k)} ${o[k]}`).join(' · ');
+  const treffer = eintraege(rep.treffer_je_signal);
+  const inLief = eintraege(rep.leads_je_signal);
+  const zeile = (lbl, val) => val ? `<div style="color:var(--text3);font-size:11.5px;margin-top:3px"><span style="color:var(--text2)">${lbl}:</span> ${val}</div>` : '';
+  return `<div style="background:var(--bg2,rgba(255,255,255,.02));border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:12px">
+    <div style="color:var(--text2);font-size:12px;font-weight:600">🔍 Durchsucht: ${signale.length} Signal${signale.length===1?'':'e'} über ${quellen.length} Quellen</div>
+    ${zeile('Quellen', quellen.map(esc).join(' · '))}
+    ${zeile('Roh-Treffer je Signal', treffer)}
+    ${zeile('In dieser Lieferung', inLief)}
+  </div>`;
+}
+
+function _portalName(url) {
+  const u = (url || '').toLowerCase();
+  const map = [['stepstone','Stepstone'],['indeed','Indeed'],['linkedin','LinkedIn'],['xing','Xing'],
+    ['yourfirm','Yourfirm'],['stellenanzeigen','Stellenanzeigen.de'],['kimeta','Kimeta'],['jobvector','Jobvector'],
+    ['meinestadt','meinestadt'],['jobware','Jobware'],['monster','Monster'],['personio','Personio'],
+    ['join.com','Join'],['lever','Lever'],['greenhouse','Greenhouse']];
+  for (const [m,n] of map) if (u.includes(m)) return n;
+  const rest = u.split('//').pop().split('/')[0];
+  return rest.replace(/^www\./,'');
+}
+
+function _signalZeile(l) {
+  const labels = l.signale_labels || (l.signal_label ? [l.signal_label] : []);
+  if (!labels.length) return '';
+  const cnt = l.signal_count || labels.length;
+  if (cnt >= 2) {
+    return `<div class="lead-detail" style="align-items:flex-start"><span class="lead-icon">🔥</span>
+      <span style="color:#fca5a5;font-size:12px;font-weight:700">${cnt} Signale: ${esc(labels.join(' + '))}</span></div>`;
+  }
+  return `<div class="lead-detail"><span class="lead-icon">⚡</span>
+    <span style="color:var(--green);font-size:12px;font-weight:600">${esc(labels[0])}</span></div>`;
+}
+
+function _belegZeilen(l) {
+  const belege = (l.signal_belege || []).filter(b => b && (b.quelle_url || b.titel));
+  if (belege.length) {
+    return belege.map(b => {
+      const q = b.quelle_url ? _portalName(b.quelle_url) : '';
+      const lbl = b.titel ? esc(String(b.titel).slice(0,70)) : (b.signal_label ? esc(b.signal_label) : 'Anzeige');
+      const link = b.quelle_url ? ` <a href="${esc(b.quelle_url)}" target="_blank" rel="noopener" style="color:var(--cyan)">↗</a>` : '';
+      return `<div class="lead-detail"><span class="lead-icon">📋</span>
+        <span style="color:var(--text3);font-size:11px">${lbl}${q?` · <b style="color:var(--text2)">${esc(q)}</b>`:''}${link}</span></div>`;
+    }).join('');
+  }
+  // Fallback: altes Einzel-Signal
+  return l.signal_titel ? `<div class="lead-detail"><span class="lead-icon">📋</span>
+    <span style="color:var(--text3);font-size:11px">${esc(l.signal_titel.slice(0,80))}</span></div>` : '';
 }
 
 function _signalLeadCard(l) {
@@ -2186,10 +2242,8 @@ function _signalLeadCard(l) {
       <div class="lead-firma">${esc(l.firma || '—')}</div>
       <div class="score-badge ${scoreClass}">${s > 0 ? s : '—'}</div>
     </div>
-    ${l.signal_label ? `<div class="lead-detail"><span class="lead-icon">⚡</span>
-      <span style="color:var(--green);font-size:12px;font-weight:600">${esc(l.signal_label)}</span></div>` : ''}
-    ${l.signal_titel ? `<div class="lead-detail"><span class="lead-icon">📋</span>
-      <span style="color:var(--text3);font-size:11px">${esc(l.signal_titel.slice(0,80))}</span></div>` : ''}
+    ${_signalZeile(l)}
+    ${_belegZeilen(l)}
     ${l.aufhaenger ? `<div class="lead-detail" style="margin-top:6px;padding:8px;background:rgba(34,211,238,.08);border-radius:6px;align-items:flex-start">
       <span class="lead-icon">✍️</span>
       <span style="color:var(--text2);font-size:12px;font-style:italic">${esc(l.aufhaenger)}</span></div>` : ''}
