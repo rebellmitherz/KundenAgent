@@ -725,6 +725,10 @@ class EngineBridge:
             "kaufbereitschaft_stufe": l.get("kaufbereitschaft_stufe", ""),
             "kaufbereitschaft_gruende": l.get("kaufbereitschaft_gruende", []),
             "kaufbereitschaft_beleg_url": l.get("kaufbereitschaft_beleg_url", "") or l.get("signal_quelle_url", ""),
+            # Premium-Gate-Urteil (Schritt 1+) sichtbar machen: Klasse + warum.
+            "premium_klasse": l.get("premium_klasse", ""),
+            "premium_gruende": l.get("premium_gruende", []),
+            "premium_stufe_cap": l.get("premium_stufe_cap", ""),
             "signal_alter_tage": l.get("signal_alter_tage"),
             "signal_frische_text": l.get("signal_frische_text", ""),
             "signale": signale,

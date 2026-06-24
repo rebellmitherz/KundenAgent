@@ -2267,6 +2267,19 @@ function _belegZeilen(l) {
     <span style="color:var(--text3);font-size:11px">${esc(l.signal_titel.slice(0,80))}</span></div>` : '';
 }
 
+function _premiumBadge(l) {
+  // Premium-Gate-Urteil als farbige Plakette: PREMIUM (gruen) / REVIEW (amber) / REJECT (rot).
+  const k = l.premium_klasse || '';
+  if (!k) return '';
+  const map = {
+    PREMIUM: ['★ PREMIUM', '#10b981', 'rgba(16,185,129,.14)'],
+    REVIEW:  ['⚠ REVIEW',  '#f59e0b', 'rgba(245,158,11,.14)'],
+    REJECT:  ['✕ REJECT',  '#ef4444', 'rgba(239,68,68,.14)'],
+  };
+  const m = map[k] || [k, 'var(--text3)', 'transparent'];
+  return `<span title="Premium-Gate" style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;color:${m[1]};background:${m[2]};border:1px solid ${m[1]}66;border-radius:999px;padding:2px 8px;white-space:nowrap">${m[0]}</span>`;
+}
+
 function _signalLeadCard(l) {
   const s = l.score || 0;
   const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
@@ -2280,8 +2293,11 @@ function _signalLeadCard(l) {
   <div class="lead-card" id="card_${did}">
     <div class="lead-header">
       <div class="lead-firma">${esc(l.firma || '—')}</div>
-      <div class="score-badge ${scoreClass}">${s > 0 ? s : '—'}</div>
+      <div style="display:flex;align-items:center;gap:6px">${_premiumBadge(l)}<div class="score-badge ${scoreClass}">${s > 0 ? s : '—'}</div></div>
     </div>
+    ${(l.premium_klasse && l.premium_klasse !== 'PREMIUM' && (l.premium_gruende || []).length) ? `<div class="lead-detail" style="margin-top:4px">
+      <span class="lead-icon">🔒</span>
+      <span style="color:var(--text3);font-size:11px">Nicht Premium: ${esc((l.premium_gruende || [])[0])}</span></div>` : ''}
     ${_signalZeile(l)}
     ${_belegZeilen(l)}
     ${l.aufhaenger ? `<div class="lead-detail" style="margin-top:6px;padding:8px;background:rgba(34,211,238,.08);border-radius:6px;align-items:flex-start">
