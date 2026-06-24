@@ -112,6 +112,42 @@ def test_gar_kein_kontakt_ist_reject():
     assert r["klasse"] == pg.REJECT
 
 
+# ── Regel 5b: No-Sales-Postfächer (jobs@/helpdesk@/noreply@ …) ───────────────
+@pytest.mark.parametrize("mail", [
+    "jobs@echte-firma.de", "helpdesk@echte-firma.de", "bewerbung@echte-firma.de",
+    "noreply@echte-firma.de", "datenschutz@echte-firma.de",
+])
+def test_no_sales_postfach_ohne_telefon_ist_reject(mail):
+    # Einziger Kanal ist ein No-Sales-Postfach → nicht sendefähig.
+    r = pg.bewerten_premium(_premium_lead(email=mail, phone=""), zielbranche="Maschinenbau")
+    assert r["klasse"] == pg.REJECT
+
+
+def test_no_sales_postfach_mit_telefon_nie_premium():
+    # Mit Telefon nicht raus, aber der Mail-Kanal ist unbrauchbar → höchstens REVIEW.
+    r = pg.bewerten_premium(_premium_lead(email="jobs@echte-firma.de"), zielbranche="Maschinenbau")
+    assert r["klasse"] == pg.REVIEW
+
+
+def test_soft_rollen_mail_mit_telefon_bleibt_premium_unveraendert():
+    # Bewusste Abgrenzung: info@ ist nur „nicht persönlich", kein No-Sales-Postfach.
+    # Mit Telefon (Mobil) bleibt der Lead PREMIUM — deckt sich mit dem Produktversprechen
+    # „Telefon/Mobil ODER persönliche Mail".
+    r = pg.bewerten_premium(_premium_lead(email="info@echte-firma.de"), zielbranche="Maschinenbau")
+    assert r["klasse"] == pg.PREMIUM
+
+
+# ── Regel 4b: Firmenname-Scrape-Artefakte ───────────────────────────────────
+@pytest.mark.parametrize("firma", [
+    "GmbH Unternehmensangaben ventx GmbH",   # echter Lauf: Rechtsform voran + Überschrift
+    "Impressum Stuer GmbH",
+    "GmbH ventx",                             # Rechtsform als erstes Wort
+])
+def test_firma_scrape_artefakt_ist_reject(firma):
+    r = pg.bewerten_premium(_premium_lead(company_name=firma), zielbranche="Maschinenbau")
+    assert r["klasse"] == pg.REJECT
+
+
 # ── Regel 6: Engine-Urteil ──────────────────────────────────────────────────
 def test_ready_to_send_no_ist_review():
     r = pg.bewerten_premium(_premium_lead(ready_to_send="no"), zielbranche="Maschinenbau")
@@ -181,5 +217,9 @@ def test_echter_lauf_smoke():
     zaehlung = pg.anreichern(leads, zielbranche=zb)
     # Summe stimmt und das Gate ist härter als das alte „33/39 = hoch".
     assert sum(zaehlung.values()) == len(leads)
-    hoch = sum(1 for l in leads if l.get("kaufbereitschaft_stufe") == "hoch")
-    assert hoch == zaehlung[pg.PREMIUM]  # nur PREMIUM darf „hoch" tragen
+    # Invariante: NUR PREMIUM darf „hoch" tragen (hoch ⊆ PREMIUM). Nicht jeder
+    # PREMIUM-Lead ist „hoch" — bei unbekanntem Beleg-Datum deckelt das Gate auf
+    # „mittel". Darum ist die korrekte Prüfung „jeder hoch-Lead ist PREMIUM" + hoch ≤ PREMIUM.
+    hoch_leads = [l for l in leads if l.get("kaufbereitschaft_stufe") == "hoch"]
+    assert all(l.get("premium_klasse") == pg.PREMIUM for l in hoch_leads)
+    assert len(hoch_leads) <= zaehlung[pg.PREMIUM]

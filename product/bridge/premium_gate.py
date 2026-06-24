@@ -62,6 +62,19 @@ _PERSON_ARTEFAKT_TOKENS = frozenset({
     "dipl", "inc", "gmbh", "ag", "kg", "ohg", "ug", "mbh", "firmenname", "b2b",
 })
 
+# Scrape-Überschriften/Rechtstext-Fragmente, die in einem echten Firmennamen nie
+# vorkommen — der Scraper hat eine Seitenüberschrift mit dem Namen verklebt
+# (echter Lauf: „GmbH Unternehmensangaben ventx GmbH").
+_FIRMA_HEADING_ARTEFAKT = frozenset({
+    "unternehmensangaben", "impressum", "kontaktformular", "seitennavigation",
+    "datenschutzerklärung", "datenschutzerklarung", "startseite", "cookieeinstellungen",
+})
+# Rechtsform als ERSTES Wort = Artefakt: ein echter Name trägt die Rechtsform als
+# Suffix („ventx GmbH"), nie als Präfix („GmbH … ventx GmbH").
+_FIRMA_RECHTSFORM_LEAD = frozenset({
+    "gmbh", "ag", "kg", "ohg", "ug", "mbh", "kgaa", "gbr", "llc", "ltd", "inc",
+})
+
 # Branchenfremde Rollen-/Funktionswörter — als „Zielbranche" untauglich (genau der
 # Defekt: „Vertrieb" als Zielgruppe matcht jede Firma). Trennt ICP von Signal.
 _ROLLEN_WORTE = frozenset({
@@ -75,6 +88,17 @@ _ROLLEN_WORTE = frozenset({
 _RANG_FAKE = frozenset({"d", "e", "f"})
 # Engine-Block-Gründe, die ein hartes K.-o. sind (echte Bounce-/Risiko-Mail).
 _BLOCK_HART = ("invalid", "risky", "bounce", "do_not_contact", "blacklist")
+
+# „No-Sales"-Postfächer: Adressen, die für eine Akquise wertlos sind, weil dort kein
+# Entscheider sitzt (Bewerbungen, Technik, Rechtstext, Automaten). Eine Rollenmail
+# wie info@/office@ ist nur „nicht persönlich"; DIESE hier sind aktiv falsch — sie
+# dürfen nie PREMIUM tragen, und als EINZIGER Kontakt ist der Lead nicht sendefähig.
+_MAIL_HART_RAUS = frozenset({
+    "jobs", "job", "karriere", "career", "careers", "bewerbung", "bewerbungen",
+    "recruiting", "hr", "personal", "noreply", "noreplay", "donotreply", "no-reply",
+    "newsletter", "datenschutz", "dsgvo", "privacy", "presse", "press", "media",
+    "webmaster", "admin", "abuse", "postmaster", "helpdesk", "support-ticket",
+})
 
 
 def _norm(text: object) -> str:
@@ -147,6 +171,13 @@ def _ist_firma_artefakt(name: str) -> bool:
     toks = _tokens(n)
     if toks & _FIRMA_ARTEFAKT_TOKENS:
         return True
+    # Scrape-Überschrift im Namen („… Unternehmensangaben …", „Impressum …").
+    if toks & _FIRMA_HEADING_ARTEFAKT:
+        return True
+    # Rechtsform als erstes Wort („GmbH Unternehmensangaben ventx GmbH").
+    woerter = n.split()
+    if woerter and woerter[0].strip(".,").lower() in _FIRMA_RECHTSFORM_LEAD:
+        return True
     # „Firmenname B2B" o. Ä. — reine Platzhalter-Kombination.
     if "b2b" in toks and ("firmenname" in toks or "musterfirma" in toks):
         return True
@@ -183,12 +214,16 @@ def _kontakt_lage(lead: dict) -> dict:
         or lead.get("contact_person") or ""
     )
     pers = bool(mail) and ist_persoenliche_mail(mail, name)
+    local = mail.split("@", 1)[0].lower() if "@" in mail else ""
+    hart_raus = (not pers) and bool(_tokens(local) & _MAIL_HART_RAUS)
     return {
         "hat_telefon": bool(tel),
         "ist_mobil": ist_mobilnummer(tel),
         "hat_mail": bool(mail),
         "persoenliche_mail": pers,
         "nur_rollen_mail": bool(mail) and not pers,
+        "mail_hart_raus": hart_raus,
+        "mail_prefix": local,
         "kein_kontakt": not tel and not mail,
     }
 
@@ -306,6 +341,14 @@ def _bewerten(lead: dict, zielbranche: str) -> dict:
     if k["kein_kontakt"]:
         kills.append("kein Kontakt (weder Telefon noch E-Mail)")
         abzug += 40
+    elif k["mail_hart_raus"] and not k["hat_telefon"]:
+        # einziger Kanal ist ein No-Sales-Postfach (jobs@/helpdesk@/noreply@ …) → nicht sendefähig.
+        kills.append(f"einziger Kontakt ist ein No-Sales-Postfach „{k['mail_prefix']}@“ — nicht sendefähig")
+        abzug += 30
+    elif k["mail_hart_raus"]:
+        # No-Sales-Postfach trotz Telefon: nie PREMIUM, der Mail-Kanal ist unbrauchbar.
+        premium_miss.append(f"E-Mail ist ein No-Sales-Postfach „{k['mail_prefix']}@“ — nur telefonisch kontaktierbar")
+        abzug += 15
     elif not k["hat_telefon"] and not k["persoenliche_mail"]:
         # nur eine Rollen-/Sammel-Mail, kein Telefon → nicht belastbar genug.
         premium_miss.append("nur Rollen-/Sammel-Mail, kein Telefon — Kontakt nicht belastbar genug")

@@ -83,8 +83,15 @@ def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
     behalten = [l for l in leads if l.get("premium_klasse") != _pg.REJECT]
     if nur_premium:
         behalten = [l for l in behalten if l.get("premium_klasse") == _pg.PREMIUM]
+
+    def _rts_yes(l: dict) -> int:
+        # Engine-Versandfreigabe ganz nach oben (yes vor review vor leer), wie vom
+        # Hermes-Feedback gefordert: ready_to_send=yes ist die stärkste Spur.
+        return 1 if str(l.get("ready_to_send") or "").strip().lower() == "yes" else 0
+
     behalten.sort(
         key=lambda l: (rang.get(l.get("premium_klasse"), 0),
+                       _rts_yes(l),
                        int(l.get("kaufbereitschaft_score") or 0)),
         reverse=True,
     )
