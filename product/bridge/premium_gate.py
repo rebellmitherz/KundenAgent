@@ -259,8 +259,13 @@ def _icp_fit(lead: dict, zielbranche: str) -> tuple[str, str]:
 
 
 # ── Hauptbewertung ──────────────────────────────────────────────────────────
-def bewerten_premium(lead: dict, *, zielbranche: str = "") -> dict:
+def bewerten_premium(lead: dict, *, zielbranche: str = "", icp_breit: bool = False) -> dict:
     """Bewertet einen Signal-Lead gegen die harten Premium-Regeln.
+
+    ``icp_breit`` (z. B. für „Versicherungsleads"): der ICP ist bewusst breit
+    („gewerblicher Mittelstand mit Trigger") — dann qualifiziert das Kaufsignal,
+    nicht eine enge Branche. Regel 7 darf in dem Fall NICHT wegen Branchen-
+    Abweichung rejecten/blocken. Alle anderen harten Regeln bleiben in Kraft.
 
     Rückgabe::
 
@@ -276,7 +281,7 @@ def bewerten_premium(lead: dict, *, zielbranche: str = "") -> dict:
     Defensiv: jeder unerwartete Fehler endet als REVIEW (nie als stiller PREMIUM).
     """
     try:
-        return _bewerten(lead, zielbranche)
+        return _bewerten(lead, zielbranche, icp_breit=icp_breit)
     except Exception as exc:  # pragma: no cover - reine Absicherung
         return {
             "klasse": REVIEW, "gruende": [f"Gate-Fehler, manuell prüfen: {exc}"],
@@ -284,7 +289,7 @@ def bewerten_premium(lead: dict, *, zielbranche: str = "") -> dict:
         }
 
 
-def _bewerten(lead: dict, zielbranche: str) -> dict:
+def _bewerten(lead: dict, zielbranche: str, icp_breit: bool = False) -> dict:
     kills: list[str] = []          # → REJECT
     premium_miss: list[str] = []   # → max REVIEW
     gruende: list[str] = []
@@ -363,7 +368,16 @@ def _bewerten(lead: dict, zielbranche: str) -> dict:
 
     # Regel 7 — echter ICP-Fit.
     fit, fit_grund = _icp_fit(lead, zielbranche)
-    if fit == "fail":
+    if icp_breit:
+        # Breiter ICP (z. B. „Versicherungsleads"): das Kaufsignal/der Trigger ist
+        # der Qualifizierer, nicht eine enge Branche. Eine Branchen-Abweichung
+        # („fail") oder ein nicht prüfbarer ICP („unbestimmt") darf den Lead NICHT
+        # rejecten oder PREMIUM blocken — sonst kippt das Gate bei breitem ICP alles.
+        # Nur ein echter Branchen-Treffer zählt weiter unten als Plus. Die harten
+        # Regeln 1–6 (Website, Kontakt, Frische, Beleg, Engine-Urteil, No-Sales-
+        # Postfach) bleiben voll in Kraft — der Qualitäts-Boden bleibt also bestehen.
+        pass
+    elif fit == "fail":
         kills.append(fit_grund)
         abzug += 25
     elif fit == "unbestimmt":
@@ -406,7 +420,7 @@ def _bewerten(lead: dict, zielbranche: str) -> dict:
     }
 
 
-def anreichern(leads: list[dict], *, zielbranche: str = "") -> dict:
+def anreichern(leads: list[dict], *, zielbranche: str = "", icp_breit: bool = False) -> dict:
     """Heftet je Lead das Gate-Urteil an (in-place) und deckelt die Kaufbereitschaft.
 
     • ``premium_klasse`` / ``premium_gruende`` / ``premium_abzug`` werden gesetzt.
@@ -419,7 +433,7 @@ def anreichern(leads: list[dict], *, zielbranche: str = "") -> dict:
     _rang = {HOCH: 3, MITTEL: 2, NIEDRIG: 1}
     for lead in leads or []:
         try:
-            r = bewerten_premium(lead, zielbranche=zielbranche)
+            r = bewerten_premium(lead, zielbranche=zielbranche, icp_breit=icp_breit)
         except Exception:
             r = {"klasse": REVIEW, "gruende": [], "abzug": 50, "stufe_cap": MITTEL}
         lead["premium_klasse"] = r["klasse"]

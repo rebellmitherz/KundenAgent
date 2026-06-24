@@ -53,6 +53,28 @@ def test_unbekanntes_signal_default_staerke():
     assert r._signal_staerke("") == 0.5
 
 
+# ─── Versicherungs-Signale (additiv) ─────────────────────────────────────────
+
+def test_versicherungs_signale_haben_staerke_und_warum():
+    from product.bridge import signal_discovery as sd
+    for st in sd._VERSICHERUNGS_SIGNAL_TYPES:
+        # echte Stärke (nicht der 0.5-Default) + kundenlesbare Begründung
+        assert r._SIGNAL_STAERKE.get(st), st
+        assert r._SIGNAL_WARUM.get(st), st
+
+
+def test_vs_hiring_ist_heisses_versicherungssignal():
+    # vs_hiring (führt zu wiederkehrender bAV) muss höher wiegen als z. B. vs_cyber.
+    heiss = r.bewerten(_lead(entdeckt_per_signal="vs_hiring",
+                             signal_titel="Mitarbeiter (m/w/d) gesucht"))
+    lau = r.bewerten(_lead(entdeckt_per_signal="vs_cyber",
+                           signal_titel="Softwareentwickler (m/w/d)"))
+    assert heiss["score"] > lau["score"], (heiss["score"], lau["score"])
+    # Kaufsignal-Begründung trägt den Versicherungs-Aufhänger.
+    assert heiss["gruende"][0].startswith("Kaufsignal:")
+    assert "bAV" in heiss["gruende"][0] or "Mitarbeiter" in heiss["gruende"][0]
+
+
 def test_persoenliche_vs_sammelmail():
     # Klares vorname.nachname-Muster → persönlich.
     assert r.ist_persoenliche_mail("max.mustermann@firma.de") is True

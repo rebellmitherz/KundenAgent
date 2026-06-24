@@ -27,6 +27,8 @@ Builder = Callable[[dict], dict]
 def angebot_aus_profil_id(profil_id: str) -> str:
     """Leitet den Angebot-Typ aus der aktiven Profil-ID ab (für die Aufhänger-Regeln)."""
     pid = (profil_id or "").lower()
+    if "versicherung" in pid:
+        return "versicherung"
     if "website" in pid or "webseite" in pid:
         return "website"
     if "akquise" in pid or "termin" in pid:

@@ -183,6 +183,34 @@ def test_falsche_branche_ist_reject():
     assert r["klasse"] == pg.REJECT
 
 
+# ── ICP-Fit-Falle: breiter ICP (Versicherungsleads) ─────────────────────────
+def test_icp_breit_branchenabweichung_rejectet_nicht():
+    # Versicherung: der Trigger qualifiziert, nicht die enge Branche. Eine
+    # Branchen-Abweichung darf den sonst sauberen Lead NICHT mehr rejecten.
+    lead = _premium_lead(entdeckt_per_signal="vs_hiring", industry="Logistik",
+                         description="Speditionsbetrieb", company_name="Echte Logistik GmbH")
+    eng = pg.bewerten_premium(lead, zielbranche="Handwerk")
+    breit = pg.bewerten_premium(lead, zielbranche="Handwerk", icp_breit=True)
+    assert eng["klasse"] == pg.REJECT          # enger ICP wie bisher: hart raus
+    assert breit["klasse"] == pg.PREMIUM       # breiter ICP: liefertbar
+
+
+def test_icp_breit_unbestimmt_blockt_premium_nicht():
+    # Ohne prüfbare Zielbranche (breiter ICP) darf der Lead trotzdem PREMIUM sein,
+    # solange alle harten Regeln (Website/Kontakt/Frische/Beleg) erfüllt sind.
+    lead = _premium_lead(entdeckt_per_signal="vs_fuhrpark", industry="Logistik")
+    r = pg.bewerten_premium(lead, zielbranche="", icp_breit=True)
+    assert r["klasse"] == pg.PREMIUM
+
+
+def test_icp_breit_haelt_andere_harte_regeln():
+    # Breiter ICP weicht NUR Regel 7 auf — die übrigen harten K.-o.-Gründe greifen weiter.
+    ohne_web = pg.bewerten_premium(
+        _premium_lead(entdeckt_per_signal="vs_hiring", website=""),
+        zielbranche="Handwerk", icp_breit=True)
+    assert ohne_web["klasse"] == pg.REJECT     # keine echte Website → trotzdem raus
+
+
 # ── Stufen-Deckelung (Kern-Fix gegen 33/39 = hoch) ──────────────────────────
 def test_anreichern_deckelt_stufe_aber_hebt_nie_an():
     leads = [

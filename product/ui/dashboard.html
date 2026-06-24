@@ -1975,14 +1975,9 @@ function renderAuftragForm() {
         </div>
         <div class="setup-form-row" id="signalTypRow" style="display:none">
           <label class="setup-label">Welche Kaufsignale? <span style="color:var(--text3);font-weight:400">(mehrere = Stapelung, Firmen mit mehreren Signalen werden 🔥 priorisiert)</span></label>
-          <div id="auf_signale" class="sig-multi">
-            <label class="sig-chk"><input type="checkbox" value="sales_hiring" checked> Stellt aktiv Vertrieb ein <span class="sig-hot">heißeste Spur</span></label>
-            <label class="sig-chk"><input type="checkbox" value="appointment_setter" checked> Sucht Terminierer / SDR (Outbound)</label>
-            <label class="sig-chk"><input type="checkbox" value="growth_expansion" checked> Wächst / baut Team aus</label>
-            <label class="sig-chk"><input type="checkbox" value="leadership_hiring"> Holt Vertriebs-/Marketingleitung</label>
-            <label class="sig-chk"><input type="checkbox" value="marketing_hiring"> Investiert in Marketing / Leadgen</label>
-            <label class="sig-chk"><input type="checkbox" value="new_location"> Eröffnet Standort / expandiert</label>
-          </div>
+          <!-- Häkchen werden je AKTIVEM Angebot gefüllt (renderSignalCheckboxes):
+               B2B-System → 6 Vertriebs-Signale · Versicherungsleads → 6 vs_-Signale. -->
+          <div id="auf_signale" class="sig-multi"></div>
           <label class="setup-label" style="margin-top:12px">Zusätzliche Quellen</label>
           <div id="auf_quellen" class="sig-multi">
             <label class="sig-chk"><input type="checkbox" id="auf_linkedin_web" value="1"> LinkedIn-Web <span style="color:var(--text3)">(gratis, experimentell)</span></label>
@@ -2004,10 +1999,44 @@ function renderAuftragForm() {
       </div>
     </div>`;
   setSuchModus(_suchModus);
+  ladeSignalTypen();   // Häkchen je aktivem Angebot füllen (Vertrieb vs. Versicherung)
 }
 
 let _suchModus = 'branche';
 let _signalPollTimer = null;
+
+// Fallback-Häkchen, falls der Meta-Endpunkt nicht erreichbar ist: die 6 Vertriebs-
+// Signale (bisheriges Verhalten). So bleibt das Formular auch offline benutzbar.
+const _SIGNAL_FALLBACK = [
+  { key:'sales_hiring',       label:'Stellt aktiv Vertrieb ein', default:true,  hot:true  },
+  { key:'appointment_setter', label:'Sucht Terminierer / SDR (Outbound)', default:true, hot:false },
+  { key:'growth_expansion',   label:'Wächst / baut Team aus', default:true,  hot:false },
+  { key:'leadership_hiring',  label:'Holt Vertriebs-/Marketingleitung', default:false, hot:false },
+  { key:'marketing_hiring',   label:'Investiert in Marketing / Leadgen', default:false, hot:false },
+  { key:'new_location',       label:'Eröffnet Standort / expandiert', default:false, hot:false },
+];
+let _signalMeta = _SIGNAL_FALLBACK;
+
+function renderSignalCheckboxes() {
+  const box = document.getElementById('auf_signale');
+  if (!box) return;
+  const meta = (_signalMeta && _signalMeta.length) ? _signalMeta : _SIGNAL_FALLBACK;
+  box.innerHTML = meta.map(s =>
+    `<label class="sig-chk"><input type="checkbox" value="${esc(s.key)}"${s.default ? ' checked' : ''}> `
+    + `${esc(s.label)}${s.hot ? ' <span class="sig-hot">heißeste Spur</span>' : ''}</label>`
+  ).join('');
+}
+
+async function ladeSignalTypen() {
+  const aktiv = _angebotAktiv || '';
+  try {
+    const r = await fetch('/api/signal-typen?angebot=' + encodeURIComponent(aktiv),
+      { headers: _adminHeaders({'Content-Type': undefined}) });
+    const d = await r.json();
+    _signalMeta = (d && d.ok && Array.isArray(d.signale) && d.signale.length) ? d.signale : _SIGNAL_FALLBACK;
+  } catch (e) { _signalMeta = _SIGNAL_FALLBACK; }
+  renderSignalCheckboxes();
+}
 
 function setSuchModus(m) {
   _suchModus = (m === 'signal') ? 'signal' : 'branche';
@@ -3006,6 +3035,9 @@ async function angebotWechseln(id) {
       _angebotAktiv = d.aktiv;
       renderAngebotDropdown();
       renderAngeboteEditor();
+      // Signal-Häkchen folgen dem Angebot (Vertrieb ↔ Versicherung), auch wenn
+      // das Auftrag-Formular gerade offen ist.
+      ladeSignalTypen();
       // Auftrag-Form ggf. neu vorbelegen, falls sichtbar
       if (document.getElementById('view-auftrag').classList.contains('active')) renderAuftragForm();
     }

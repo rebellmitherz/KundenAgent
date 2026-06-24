@@ -154,14 +154,64 @@ _SIGNAL_BEGRIFFE = {
         "eroeffnet", "expandiert", "expansion", "markteintritt", "standort",
         "neueröffnung", "neueroeffnung",
     ],
+    # ─── Versicherungs-Signal-Set v1 (additiv, für das Angebot „Versicherungsleads") ───
+    # Eigene Kaufsignal-Logik: Versicherung verkauft sich über eine VERÄNDERUNG, die
+    # eine Deckungslücke aufreißt (Hiring → bAV, Fuhrpark, Standort, Maschinen, Cyber).
+    # Alle über dieselbe Jobportal-/Website-Discovery erkennbar (gleiche Pipeline).
+    # Reihenfolge = Gewichtung für „die Bayerische" (Personenversicherung im Betrieb).
+    "vs_hiring": [
+        "mitarbeiter", "stellenangebot", "vollzeit", "m/w/d", "w/m/d", "m/w",
+        "verstärkung", "verstaerkung", "wir stellen ein", "team", "gesucht",
+        "bewerbung", "einstellung", "neue stelle", "wir suchen",
+    ],
+    "vs_benefits": [
+        "betriebliche altersvorsorge", "bav", "gesundheitsbudget", "bkv",
+        "mitarbeiterbenefits", "benefits", "jobrad", "zusatzversicherung",
+        "betriebliche krankenversicherung", "altersvorsorge", "corporate benefits",
+    ],
+    "vs_fuhrpark": [
+        "berufskraftfahrer", "fahrer", "auslieferung", "monteur",
+        "servicetechniker", "außendienst", "aussendienst", "fuhrpark", "flotte",
+        "lkw", "kraftfahrer", "lieferfahrer", "kurierfahrer",
+    ],
+    "vs_standort": [
+        "neuer standort", "niederlassung", "eröffnet", "eroeffnet", "expandiert",
+        "neue filiale", "markteintritt", "expansion", "standort",
+        "neueröffnung", "neueroeffnung",
+    ],
+    "vs_produktion": [
+        "produktion", "maschinenbediener", "fertigung", "lager", "werkstatt",
+        "produktionsmitarbeiter", "schichtarbeit", "maschine", "produktionshelfer",
+        "fertigungsmitarbeiter", "lagermitarbeiter", "cnc",
+    ],
+    "vs_cyber": [
+        "softwareentwickler", "it", "onlineshop", "saas", "kundendaten", "isms",
+        "informationssicherheit", "nis2", "iso 27001", "it-sicherheit",
+        "softwareentwicklung", "it-administrator", "cyber",
+    ],
 }
 
 # Kanonische Signaltypen + UI-Labels (Quelle der Wahrheit; engine_bridge zieht
 # die Labels hierher). Reihenfolge = Stärke-/Relevanz-Reihenfolge fürs Produkt.
-SIGNAL_TYPES = (
+#
+# Zwei Gruppen, je Angebot gekoppelt (siehe product/bridge/angebot_signale.py):
+#   • VERTRIEBS-Signale  → B2B-System/Akquise/Website (unverändert, 6 Stück).
+#   • VERSICHERUNGS-Signale → „Versicherungsleads" (neu, additiv, 6 Stück).
+# Beide bleiben getrennt; ein Angebot zeigt nur seine Gruppe.
+_VERTRIEBS_SIGNAL_TYPES = (
     "sales_hiring", "growth_expansion", "appointment_setter",
     "marketing_hiring", "leadership_hiring", "new_location",
 )
+_VERSICHERUNGS_SIGNAL_TYPES = (
+    "vs_hiring", "vs_benefits", "vs_fuhrpark",
+    "vs_standort", "vs_produktion", "vs_cyber",
+)
+# Roadmap (Phase 2, NICHT in v1): vs_neugruendung (junge GmbH, kein Altmakler →
+# braucht alles) + vs_gf_wechsel (GF-Wechsel/Übernahme → D&O + Vertrags-Review).
+# Größter Greenfield-Hebel, braucht aber eine NEUE Quelle (Handelsregister/Unter-
+# nehmensregister bzw. North Data) — die bestehende Jobportal-Discovery sieht das
+# nicht. Bewusst aufgeschoben, damit v1 bei der „günstigen" Pipeline bleibt.
+SIGNAL_TYPES = _VERTRIEBS_SIGNAL_TYPES + _VERSICHERUNGS_SIGNAL_TYPES
 SIGNAL_LABELS = {
     "sales_hiring": "Stellt Vertrieb ein",
     "growth_expansion": "Wächst / baut Team aus",
@@ -169,6 +219,13 @@ SIGNAL_LABELS = {
     "marketing_hiring": "Investiert in Marketing / Leadgen",
     "leadership_hiring": "Holt Vertriebs-/Marketing-Leitung",
     "new_location": "Eröffnet Standort / expandiert",
+    # Versicherungs-Signale (Veränderung → Deckungslücke).
+    "vs_hiring": "Stellt Mitarbeiter ein / wächst",
+    "vs_benefits": "Wirbt mit Benefits (bAV/bKV)",
+    "vs_fuhrpark": "Fuhrpark / Fahrer / Außendienst",
+    "vs_standort": "Neue Niederlassung / Expansion",
+    "vs_produktion": "Produktion / Maschinen / Lager",
+    "vs_cyber": "IT-/Cyber-Risiko sichtbar (NIS2)",
 }
 
 
@@ -478,6 +535,31 @@ _SIGNAL_KEYWORDS: dict[str, list[str]] = {
     "new_location": [
         "neuer Standort", "neue Niederlassung", "Niederlassung eröffnet",
         "expandiert", "für unseren neuen Standort",
+    ],
+    # ─── Versicherungs-Signale (deutsche Begriffe zuerst — max_queries schneidet ab) ───
+    "vs_hiring": [
+        "Mitarbeiter gesucht", "Wir stellen ein", "Verstärkung gesucht",
+        "Stellenangebot", "Vollzeit", "m/w/d",
+    ],
+    "vs_benefits": [
+        "betriebliche Altersvorsorge", "bAV", "Mitarbeiterbenefits",
+        "Gesundheitsbudget", "betriebliche Krankenversicherung", "Jobrad",
+    ],
+    "vs_fuhrpark": [
+        "Berufskraftfahrer", "Fahrer gesucht", "Kraftfahrer",
+        "Servicetechniker", "Monteur", "Außendienst",
+    ],
+    "vs_standort": [
+        "neuer Standort", "neue Niederlassung", "Niederlassung eröffnet",
+        "expandiert", "neue Filiale",
+    ],
+    "vs_produktion": [
+        "Produktionsmitarbeiter", "Maschinenbediener", "Fertigung",
+        "Produktionshelfer", "Lagermitarbeiter", "Schichtarbeit",
+    ],
+    "vs_cyber": [
+        "Softwareentwickler", "IT-Administrator", "Informationssicherheit",
+        "IT-Sicherheit", "ISO 27001", "NIS2",
     ],
 }
 

@@ -29,6 +29,14 @@ _SIGNAL_STAERKE: dict[str, float] = {
     "growth_expansion": 0.65,
     "marketing_hiring": 0.55,
     "new_location": 0.55,
+    # Versicherungs-Signale (Reihenfolge = Gewichtung für „die Bayerische").
+    # vs_hiring am stärksten: führt zu bAV (wiederkehrend) + bAV-Zuschusspflicht.
+    "vs_hiring": 0.9,
+    "vs_benefits": 0.8,
+    "vs_fuhrpark": 0.7,
+    "vs_standort": 0.65,
+    "vs_produktion": 0.6,
+    "vs_cyber": 0.6,
 }
 
 # Warum der Signaltyp ein Kaufsignal ist (Analyse-Zeile, kundenlesbar).
@@ -39,6 +47,13 @@ _SIGNAL_WARUM: dict[str, str] = {
     "growth_expansion": "wächst / baut Team aus",
     "marketing_hiring": "investiert in Marketing / Leadgen",
     "new_location": "eröffnet Standort / expandiert",
+    # Versicherungs-Signale: je eine Veränderung, die eine Deckungslücke aufreißt.
+    "vs_hiring": "stellt ein — bAV-Zuschusspflicht (15 %) für neue Mitarbeiter mitgewachsen?",
+    "vs_benefits": "wirbt mit Benefits — bAV/bKV oft nicht optimal aufgebaut, Check lohnt",
+    "vs_fuhrpark": "Fuhrpark/Fahrer — bei Flotten oft Lücken im Schadenfall (Insassen-/Gruppenunfall)",
+    "vs_standort": "eröffnet neuen Standort — Versicherungen laufen oft noch auf altem Stand",
+    "vs_produktion": "Produktion/Maschinen — ein Betriebsausfall kann mehr kosten als die Jahresprämie",
+    "vs_cyber": "IT-/Cyber-Risiko sichtbar — Cyber wird Pflichtthema (NIS2)",
 }
 
 # Gewichte (Summe 1): Signalstärke dominiert (= der Kaufbereitschafts-Kern),

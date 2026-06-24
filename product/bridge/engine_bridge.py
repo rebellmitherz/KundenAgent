@@ -61,7 +61,7 @@ def _uebersuch_roh_ziel(ziel: int) -> int:
 
 
 def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
-                  nur_premium: bool = False) -> tuple[list[dict], dict]:
+                  nur_premium: bool = False, icp_breit: bool = False) -> tuple[list[dict], dict]:
     """Wendet das Premium-Gate auf die angereicherten Leads an und bestimmt die
     Ausgabe nach der „über-suchen, dann hart filtern"-Politik:
 
@@ -77,7 +77,7 @@ def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
     """
     from product.bridge import premium_gate as _pg
 
-    zaehlung = _pg.anreichern(leads, zielbranche=zielbranche)
+    zaehlung = _pg.anreichern(leads, zielbranche=zielbranche, icp_breit=icp_breit)
     rang = {_pg.PREMIUM: 3, _pg.REVIEW: 2, _pg.REJECT: 1}
 
     behalten = [l for l in leads if l.get("premium_klasse") != _pg.REJECT]
@@ -443,9 +443,15 @@ class EngineBridge:
         # so wird vor der teuren Personalisierung schon hart gefiltert.
         _nur_premium = str(os.environ.get("SIGNAL_NUR_PREMIUM", "") or "").strip().lower() \
             in ("1", "true", "yes", "ja")
+        # ICP-Fit-Falle (Regel 7): bei Versicherungs-Signalen ist der ICP bewusst
+        # breit (gewerblich + Trigger). Das Gate darf dann nicht alles wegen
+        # Branchen-Abweichung rejecten — abgeleitet aus dem gewählten Signal-Set.
+        from product.bridge import angebot_signale as _as
+        _icp_breit = _as.ist_versicherungs_signalset(signal_typen)
         _vor_gate = len(leads)
         leads, gate_zaehlung = _gate_ausgabe(
-            leads, ziel=ziel, zielbranche=auftrag.zielgruppe, nur_premium=_nur_premium)
+            leads, ziel=ziel, zielbranche=auftrag.zielgruppe,
+            nur_premium=_nur_premium, icp_breit=_icp_breit)
         print(
             f"[signal] Premium-Gate: PREMIUM={gate_zaehlung.get('PREMIUM', 0)} "
             f"REVIEW={gate_zaehlung.get('REVIEW', 0)} REJECT={gate_zaehlung.get('REJECT', 0)} "

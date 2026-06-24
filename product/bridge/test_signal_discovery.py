@@ -84,11 +84,40 @@ def test_fit_bewerten_echte_firma_bleibt():
 
 # ─── Inkrement 2: Signal-Breite (2 → 6) ──────────────────────────────────────
 
-def test_signal_taxonomie_sechs():
-    # A3-Befund „nur 2 von 6" → jetzt 6 Signaltypen, alle mit Begriffen + Label.
-    assert len(sd.SIGNAL_TYPES) == 6
+def test_signal_taxonomie_zwei_gruppen():
+    # Zwei getrennte Gruppen: 6 Vertriebs- + 6 Versicherungs-Signale (additiv).
+    assert len(sd._VERTRIEBS_SIGNAL_TYPES) == 6
+    assert len(sd._VERSICHERUNGS_SIGNAL_TYPES) == 6
+    assert len(sd.SIGNAL_TYPES) == 12
+    # keine Überschneidung der beiden Welten
+    assert not (set(sd._VERTRIEBS_SIGNAL_TYPES) & set(sd._VERSICHERUNGS_SIGNAL_TYPES))
+    # jeder Typ hat Begriffe (Fit) UND ein Label
     assert set(sd.SIGNAL_TYPES) <= set(sd._SIGNAL_BEGRIFFE)
     assert all(t in sd.SIGNAL_LABELS for t in sd.SIGNAL_TYPES)
+
+
+def test_versicherungs_signale_haben_keywords_und_label():
+    # Alle vs_-Signale müssen Discovery-Keywords + Label tragen (sonst leere Suche).
+    for st in sd._VERSICHERUNGS_SIGNAL_TYPES:
+        assert sd._SIGNAL_KEYWORDS.get(st), st
+        assert st in sd.SIGNAL_LABELS, st
+
+
+def test_build_signal_queries_versicherung():
+    # Versicherungs-Signale laufen über dieselbe Jobportal-Discovery (mit Zielort).
+    for st in sd._VERSICHERUNGS_SIGNAL_TYPES:
+        qs = sd._build_signal_queries("Logistik", "Leipzig", st)
+        assert qs, st
+        assert all("Leipzig" in q for q in qs), (st, qs[:2])
+        assert len(qs) == len({q.casefold() for q in qs}), st  # dedupe
+
+
+def test_fit_bewerten_vs_hiring():
+    score, status = sd._fit_bewerten(
+        "Echte Logistik GmbH", "Lagermitarbeiter (m/w/d) Vollzeit gesucht",
+        industry="Logistik", city="Leipzig", signal_type="vs_hiring",
+    )
+    assert score >= 0.6 and status in ("target_fit", "maybe_fit"), (score, status)
 
 
 def test_build_signal_queries_neue_signale():

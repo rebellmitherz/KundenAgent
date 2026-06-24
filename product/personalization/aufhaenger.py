@@ -39,6 +39,7 @@ LLM = Callable[[str], str]
 ANGEBOT_KUNDENAGENT = "kundenagent"
 ANGEBOT_AKQUISE = "akquise"
 ANGEBOT_WEBSITE = "website"
+ANGEBOT_VERSICHERUNG = "versicherung"
 
 
 @dataclass
@@ -57,6 +58,8 @@ def aufhaenger_angle(lead: dict, angebot_typ: str) -> Optional[Aufhaenger]:
 
     if angebot == ANGEBOT_WEBSITE:
         return _website_angle(lead)
+    if angebot == ANGEBOT_VERSICHERUNG:
+        return _versicherung_angle(lead)
     if angebot in (ANGEBOT_KUNDENAGENT, ANGEBOT_AKQUISE):
         return _akquise_angle(lead)
     return None
@@ -119,6 +122,65 @@ def _akquise_angle(lead: dict) -> Optional[Aufhaenger]:
         typ, fallback = _NEUE_ANGLES[signal]
         return Aufhaenger(typ=typ, fakten={"hinweis": titel, "quelle": quelle}, fallback_satz=fallback)
     return None
+
+
+def _versicherung_angle(lead: dict) -> Optional[Aufhaenger]:
+    """Versicherungs-Angebot: jedes vs_*-Signal ist eine Veränderung, die eine
+    Deckungslücke aufreißt. Der Makler eröffnet den Call mit genau diesem Trigger
+    (nicht mit „brauchen Sie Versicherung?"). Jeder Lead bekommt so einen fertigen,
+    belegbaren Aufhänger-Satz — auch ohne LLM. Quelle: ``entdeckt_per_signal``.
+    """
+    signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
+    titel = (lead.get("signal_titel") or "").strip()
+    quelle = (lead.get("signal_quelle_url") or "").strip()
+    angle = _VS_ANGLES.get(signal)
+    if not angle:
+        return None
+    typ, fallback = angle
+    return Aufhaenger(typ=typ, fakten={"hinweis": titel, "quelle": quelle}, fallback_satz=fallback)
+
+
+# Versicherungs-Signal → (Aufhänger-Typ, deterministischer Fallback-Satz). Der
+# Satz ist ein respektvoller Gesprächseinstieg, der den Trigger benennt und sanft
+# auf die mögliche Deckungslücke überleitet — sachlich, keine Panikmache.
+_VS_ANGLES: dict[str, tuple[str, str]] = {
+    "vs_hiring": (
+        "vs_hiring",
+        "Mir ist aufgefallen, dass Sie gerade einstellen – da lohnt ein kurzer Blick, "
+        "ob die betriebliche Altersvorsorge inklusive der 15-%-Zuschusspflicht für die "
+        "neuen Mitarbeiter sauber mitgewachsen ist.",
+    ),
+    "vs_benefits": (
+        "vs_benefits",
+        "Mir ist aufgefallen, dass Sie aktiv mit Benefits werben – erfahrungsgemäß ist "
+        "die bAV/bKV dabei selten optimal aufgesetzt, ein kurzer Check holt da oft mehr "
+        "für Ihre Leute heraus.",
+    ),
+    "vs_fuhrpark": (
+        "vs_fuhrpark",
+        "Mir ist aufgefallen, dass bei Ihnen Fahrer bzw. Außendienst unterwegs sind – "
+        "bei Fuhrparks klaffen im Schadenfall oft Lücken, gerade beim Insassen-/"
+        "Gruppenunfallschutz, das lässt sich schnell prüfen.",
+    ),
+    "vs_standort": (
+        "vs_standort",
+        "Mir ist aufgefallen, dass Sie gerade einen neuen Standort aufbauen – die "
+        "Versicherungen laufen in so einer Phase oft noch auf altem Stand und decken "
+        "den neuen Betrieb nicht voll ab.",
+    ),
+    "vs_produktion": (
+        "vs_produktion",
+        "Mir ist aufgefallen, dass bei Ihnen Produktion bzw. Maschinen im Spiel sind – "
+        "ein einziger längerer Betriebsausfall kostet dort schnell mehr als die "
+        "Jahresprämie, deshalb lohnt der kurze Blick auf die Absicherung.",
+    ),
+    "vs_cyber": (
+        "vs_cyber",
+        "Mir ist aufgefallen, dass bei Ihnen IT bzw. Kundendaten eine zentrale Rolle "
+        "spielen – Cyber-Absicherung wird gerade zum Pflichtthema (NIS2), ein kurzer "
+        "Risiko-Check lohnt sich, bevor etwas passiert.",
+    ),
+}
 
 
 def _website_angle(lead: dict) -> Optional[Aufhaenger]:
@@ -222,6 +284,37 @@ _AUFGABE = {
         "Schreibe 1–2 Sätze, die die konkret beobachteten Schwachstellen der Website "
         "sachlich benennen und klar machen, dass dadurch Anfragen verloren gehen. "
         "Sachlich, nicht abwertend."
+    ),
+    # Versicherungs-Angles: Trigger benennen, sanft auf die Deckungslücke überleiten,
+    # KEINE Panikmache, kein Verkaufsdruck, kein Lob.
+    "vs_hiring": (
+        "Schreibe 1–2 Sätze als Gesprächseinstieg, der aufgreift, dass die Firma gerade "
+        "einstellt, und sanft auf die betriebliche Altersvorsorge inklusive der 15-%-"
+        "Zuschusspflicht für neue Mitarbeiter überleitet. Sachlich, keine Panikmache."
+    ),
+    "vs_benefits": (
+        "Schreibe 1–2 Sätze, die aufgreifen, dass die Firma mit Benefits wirbt, und "
+        "andeuten, dass die bAV/bKV dabei oft nicht optimal aufgesetzt ist. Respektvoll, "
+        "kein Verkaufsdruck."
+    ),
+    "vs_fuhrpark": (
+        "Schreibe 1–2 Sätze, die aufgreifen, dass die Firma Fahrer/Außendienst/Fuhrpark "
+        "hat, und sachlich auf mögliche Lücken im Schadenfall (inkl. Insassen-/"
+        "Gruppenunfall) hinweisen. Nüchtern, ohne Drohung."
+    ),
+    "vs_standort": (
+        "Schreibe 1–2 Sätze, die aufgreifen, dass die Firma einen neuen Standort "
+        "aufbaut, und darauf hinweisen, dass die Versicherungen oft noch auf altem "
+        "Stand laufen. Sachlich."
+    ),
+    "vs_produktion": (
+        "Schreibe 1–2 Sätze, die aufgreifen, dass die Firma Produktion/Maschinen/Lager "
+        "betreibt, und nüchtern klarmachen, dass ein Betriebsausfall teuer werden kann. "
+        "Keine Angstmache."
+    ),
+    "vs_cyber": (
+        "Schreibe 1–2 Sätze, die aufgreifen, dass IT/Kundendaten zentral sind, und auf "
+        "Cyber als wachsendes Pflichtthema (NIS2) überleiten. Sachlich, kein Alarmismus."
     ),
 }
 

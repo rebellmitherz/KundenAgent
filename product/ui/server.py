@@ -248,6 +248,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_agent_antworten()
         elif self.path == "/api/agent/signal-leads":
             self._serve_signal_leads()
+        elif self.path.split("?", 1)[0] == "/api/signal-typen":
+            self._serve_signal_typen()
         elif self.path == "/api/agent/nachfass-faellig":
             self._serve_agent_nachfass_faellig()
         elif self.path.split("?", 1)[0] == "/api/agent/funnel":
@@ -720,6 +722,33 @@ class _Handler(BaseHTTPRequestHandler):
                            "Ergebnisse erscheinen, sobald der Lauf fertig ist.",
             })
         except Exception as e:
+            self._json({"ok": False, "meldung": str(e)})
+
+    def _serve_signal_typen(self):
+        """GET /api/signal-typen?angebot=<id> — Häkchen-Meta für das Angebot.
+
+        Liefert die Signal-Liste (key/label/default/hot), die zum gewählten (oder,
+        ohne Parameter, zum aktiven) Angebot gehört. So richtet sich die UI-Häkchen-
+        liste nach dem Angebot: „B2B-System" → 6 Vertriebs-Signale, „Versicherungs-
+        leads" → 6 Versicherungs-Signale. Nicht-sensitiv (nur Labels), kein Versand.
+        """
+        from urllib.parse import urlparse as _u, parse_qs as _q
+        from product.bridge import angebot_signale as _as
+        qs = _q(_u(self.path).query)
+        angebot = (qs.get("angebot", [""])[0]).strip()
+        if not angebot:
+            try:
+                angebot = str(profil_store.aktives_profil().get("id", ""))
+            except Exception:
+                angebot = ""
+        try:
+            self._json({
+                "ok": True,
+                "angebot": angebot,
+                "gruppe": _as.gruppe_fuer_angebot(angebot),
+                "signale": _as.signal_meta_fuer_angebot(angebot),
+            })
+        except Exception as e:  # noqa: BLE001
             self._json({"ok": False, "meldung": str(e)})
 
     def _serve_signal_leads(self):
