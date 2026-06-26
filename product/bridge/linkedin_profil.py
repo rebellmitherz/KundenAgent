@@ -38,13 +38,18 @@ _APIFY_PROFILE_ACTOR = os.environ.get(
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
+def _env_datei() -> str:
+    return str(
+        ((__import__("pathlib").Path(__file__).resolve().parent.parent.parent) / "b2bbot" / ".env")
+    )
+
+
 def _serper_key() -> str:
     key = os.environ.get("SERPER_API_KEY", "").strip()
     if key:
         return key
     try:
-        p = os.path.join(os.path.dirname(__file__), "..", "..", "b2bbot", ".env")
-        for line in open(p, encoding="utf-8"):
+        for line in open(_env_datei(), encoding="utf-8"):
             if line.startswith("SERPER_API_KEY="):
                 return line.split("=", 1)[1].strip()
     except Exception:
@@ -57,8 +62,7 @@ def _apify_key() -> str:
     if key:
         return key
     try:
-        p = os.path.join(os.path.dirname(__file__), "..", "..", "b2bbot", ".env")
-        for line in open(p, encoding="utf-8"):
+        for line in open(_env_datei(), encoding="utf-8"):
             if line.startswith("APIFY_API_KEY="):
                 return line.split("=", 1)[1].strip()
     except Exception:
