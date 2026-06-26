@@ -461,6 +461,7 @@ class EngineBridge:
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
         # kippen — ohne Key/Signal bleibt es eine saubere generische Mail.
         self._signal_leads_personalisieren(leads)
+        self._signal_briefing_erstellen(leads)
 
         # Such-Coverage-Report (Transparenz fürs Operator-UI): durchsuchte Quellen,
         # Roh-Treffer je Signal (aus der Discovery) + finale Lead-Verteilung je Signal.
@@ -621,6 +622,21 @@ class EngineBridge:
         except Exception:
             for lead in leads:
                 lead.setdefault("aufhaenger", "")
+
+    def _signal_briefing_erstellen(self, leads: list[dict]) -> None:
+        """Hängt ein Anruf-Briefing an jeden Lead (Kurzprofil + Opener + Einwände).
+
+        Läuft nach ``_signal_leads_personalisieren``, damit ``aufhaenger`` bereits
+        gesetzt ist (kein Doppel-LLM-Call). Defensiv: ein Fehler kippt nie die
+        gesamte Signal-Suche.
+        """
+        try:
+            from product.bridge import briefing as _br
+            from product.personalization.aufhaenger import standard_llm as _std_llm
+            _br.anreichern(leads, llm=_std_llm())
+        except Exception:
+            for lead in leads:
+                lead.setdefault("briefing", {"kurzprofil": "", "opener": "", "einwaende": []})
 
     def _signal_leads_schreiben(
         self, leads: list[dict], auftrag: Auftrag, signal_typ: str, laender=("de",),
