@@ -422,6 +422,7 @@ class EngineBridge:
         # Kontakt-Anreicherung (Weg-2-Tiefe): Telefon aus bereits gescraptem Text
         # + persönlicher Mail-Vorschlag. Defensiv, kein Auto-Send, kein Live-Lookup.
         self._signal_kontakt_anreichern(leads)
+        self._signal_linkedin_anreichern(leads)
         # Kontakt-Pflicht (Emilio): Ein Lead ohne JEDE Kontaktmöglichkeit (weder
         # E-Mail NOCH Telefon) ist für Outreach wertlos → vor Personalisierung und
         # Schreiben aussortieren, damit er gar nicht erst auftaucht.
@@ -574,6 +575,30 @@ class EngineBridge:
             _ce.anreichern(leads, telefon_sucher=sucher, person_sucher=person)
         except Exception:
             pass
+
+    def _signal_linkedin_anreichern(self, leads: list[dict]) -> None:
+        """LinkedIn-URL + optionales Profil-Scraping (Apify) je Lead.
+
+        Stufe 1 (Serper, 1 Query je Lead mit Name): LinkedIn-URL suchen.
+        Stufe 2 (Apify, opt-in): Foto + Titel + Tenure scrapen.
+        Defensiv: Fehler kippt nie die Suche. Läuft nur wenn Ansprechpartner vorhanden.
+        """
+        try:
+            from product.bridge import linkedin_profil as _lp
+            stats = _lp.anreichern(leads, scrape=True)
+            gefunden = stats.get("url_gefunden", 0)
+            gescrapt = stats.get("scrape_ok", 0)
+            if gefunden or gescrapt:
+                print(
+                    f"[signal] LinkedIn: {gefunden} URLs gefunden, "
+                    f"{gescrapt} Profile gescrapt.", flush=True,
+                )
+        except Exception:
+            for lead in leads:
+                lead.setdefault("linkedin_profil", {
+                    "url": "", "foto_url": "", "titel": "",
+                    "firma_li": "", "seit": "", "tenure_jahre": 0, "scrape_ok": False,
+                })
 
     def _signal_readiness_bewerten(self, leads: list[dict]) -> None:
         """Heftet je Signal-Lead die Kaufbereitschafts-Analyse an (Score/Stufe/
