@@ -107,3 +107,29 @@ def test_gate_ausgabe_taggt_jeden_lead():
     eb._gate_ausgabe(leads, ziel=10, zielbranche="Maschinenbau")
     for l in leads:
         assert l.get("premium_klasse") in (pg.PREMIUM, pg.REVIEW, pg.REJECT)
+
+
+# ── „Branche egal" / breiter ICP (Regel 7 greift nicht, Boden bleibt) ────────
+def test_gate_ausgabe_ohne_breit_leere_zielbranche_nur_review():
+    # Normalfall: ohne Zielbranche → Regel 7 „unbestimmt" → höchstens REVIEW.
+    leads = [_premium()]
+    aus, z = eb._gate_ausgabe(leads, ziel=10, zielbranche="")
+    assert z[pg.PREMIUM] == 0 and z[pg.REVIEW] == 1
+    assert aus[0]["premium_klasse"] == pg.REVIEW
+
+
+def test_gate_ausgabe_branche_egal_macht_premium():
+    # „Branche egal" (icp_breit=True): derselbe Lead ohne Zielbranche wird PREMIUM —
+    # das Kaufsignal qualifiziert, nicht die enge Branche.
+    leads = [_premium()]
+    aus, z = eb._gate_ausgabe(leads, ziel=10, zielbranche="", icp_breit=True)
+    assert z[pg.PREMIUM] == 1
+    assert aus[0]["premium_klasse"] == pg.PREMIUM
+
+
+def test_gate_ausgabe_branche_egal_haelt_harte_regeln():
+    # Auch im breiten ICP bleibt der Qualitäts-Boden: ein Lead ohne echte Website
+    # fliegt weiter raus (Regel 3). „Branche egal" ≠ „Qualität egal".
+    leads = [_premium(website="")]
+    aus, z = eb._gate_ausgabe(leads, ziel=10, zielbranche="", icp_breit=True)
+    assert z[pg.REJECT] == 1 and len(aus) == 0

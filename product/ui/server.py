@@ -670,6 +670,10 @@ class _Handler(BaseHTTPRequestHandler):
         # LinkedIn-Quellen (Toggles). Pro nur wirksam mit APIFY_API_KEY (sonst 0 €).
         linkedin_web = bool(d.get("linkedin_web", False))
         linkedin_pro = bool(d.get("linkedin_pro", False))
+        # „Branche egal" (horizontale Angebote wie Kaltakquise/Versicherung): die
+        # Zielbranche ist dann optional und der ICP bewusst breit (Mittelstand +
+        # Signal). Das Premium-Gate rejectet nicht mehr wegen Branchen-Abweichung.
+        branche_egal = bool(d.get("branche_egal", False))
         # Länder-Auswahl (DACH). Akzeptiert Liste ["de","at"] ODER String "dach"/"de".
         roh_land = d.get("laender", d.get("land", ["de"]))
         if isinstance(roh_land, str):
@@ -686,18 +690,22 @@ class _Handler(BaseHTTPRequestHandler):
         if unbekannt:
             self._json({"ok": False, "meldung": f"Unbekannter Signaltyp: {', '.join(unbekannt)}"})
             return
-        if not zielgruppe:
-            self._json({"ok": False, "meldung": "Zielbranche ist Pflicht."})
-            return
-        # Intake-Trennung (Premium-Gate, Schritt 5): die ZIELBRANCHE muss eine echte
-        # Branche sein, kein Signal/keine Rolle. „Vertrieb" als Branche matcht jede
-        # Firma → genau das macht die Ausgabe weich. Das Kaufsignal wählt man separat.
-        if ist_rollenwort(zielgruppe):
-            self._json({"ok": False, "meldung":
-                f"„{zielgruppe}“ ist ein Signal/eine Rolle, keine Branche. Bitte die "
-                "ZIELBRANCHE angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk, "
-                "B2B-SaaS) — das Kaufsignal wählst du darunter per Checkbox."})
-            return
+        # „Branche egal"-Modus: Zielbranche optional, keine Rollenwort-Prüfung — der
+        # ICP ist bewusst breit (gewerblicher Mittelstand mit Signal). Sonst gelten
+        # die normalen Intake-Regeln (echte Branche Pflicht, kein Rollen-/Signalwort).
+        if not branche_egal:
+            if not zielgruppe:
+                self._json({"ok": False, "meldung": "Zielbranche ist Pflicht."})
+                return
+            # Intake-Trennung (Premium-Gate, Schritt 5): die ZIELBRANCHE muss eine echte
+            # Branche sein, kein Signal/keine Rolle. „Vertrieb" als Branche matcht jede
+            # Firma → genau das macht die Ausgabe weich. Das Kaufsignal wählt man separat.
+            if ist_rollenwort(zielgruppe):
+                self._json({"ok": False, "meldung":
+                    f"„{zielgruppe}“ ist ein Signal/eine Rolle, keine Branche. Bitte die "
+                    "ZIELBRANCHE angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk, "
+                    "B2B-SaaS) — das Kaufsignal wählst du darunter per Checkbox."})
+                return
         if anzahl <= 0:
             self._json({"ok": False, "meldung": "Bitte eine Lead-Anzahl > 0 angeben."})
             return
@@ -713,12 +721,14 @@ class _Handler(BaseHTTPRequestHandler):
             )
             runner.signal_suche_im_hintergrund(
                 auftrag, signal_typ=signale, laender=laender,
-                linkedin_web=linkedin_web, linkedin_pro=linkedin_pro)
+                linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
+                branche_egal=branche_egal)
             wo = region if region else (", ".join(l.upper() for l in laender))
             stapel = f" · {len(signale)} Signale gestapelt" if len(signale) > 1 else ""
+            was = zielgruppe if zielgruppe else "Branche egal (Mittelstand + Signal)"
             self._json({
                 "ok": True,
-                "meldung": f"Signal-Suche gestartet: {zielgruppe} · {wo}{stapel}. "
+                "meldung": f"Signal-Suche gestartet: {was} · {wo}{stapel}. "
                            "Ergebnisse erscheinen, sobald der Lauf fertig ist.",
             })
         except Exception as e:

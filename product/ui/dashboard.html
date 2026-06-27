@@ -1983,6 +1983,10 @@ function renderAuftragForm() {
             <label class="sig-chk"><input type="checkbox" id="auf_linkedin_web" value="1"> LinkedIn-Web <span style="color:var(--text3)">(gratis, experimentell)</span></label>
             <label class="sig-chk"><input type="checkbox" id="auf_linkedin_pro" value="1"> LinkedIn-Pro <span style="color:var(--text3)">(Apify — nur mit API-Key, kostet)</span></label>
           </div>
+          <label class="setup-label" style="margin-top:12px">ICP-Breite</label>
+          <div class="sig-multi">
+            <label class="sig-chk"><input type="checkbox" id="auf_branche_egal" value="1" onchange="brancheEgalToggle()"> Branche egal <span style="color:var(--text3)">(gewerblicher Mittelstand mit Signal — Zielbranche optional; für horizontale Angebote wie Kaltakquise/Versicherung)</span></label>
+          </div>
         </div>
         <div class="setup-form-row">
           <label class="setup-label">Lead-Anzahl (Ziel)</label>
@@ -2071,6 +2075,25 @@ function setSuchModus(m) {
     if (region) { region.required = true; region.placeholder = 'z. B. Köln, NRW'; }
     hint.innerHTML = 'Standard: durchsucht die ganze Branche in der Region. Breite Abdeckung.';
     btn.textContent = '→ Kampagne starten';
+    // Branchen-Modus braucht IMMER eine echte Zielbranche — „Branche egal" gilt nur
+    // für die Signal-Suche. Pflicht wiederherstellen, falls vorher abgewählt.
+    const zb = document.getElementById('auf_zielgruppe');
+    if (zb) zb.required = true;
+  }
+}
+
+// „Branche egal" (nur Signal-Modus): Zielbranche optional, ICP bewusst breit. Macht
+// das Zielbranche-Feld nicht-Pflicht, damit die Native-Validierung nicht blockt.
+function brancheEgalToggle() {
+  const cb = document.getElementById('auf_branche_egal');
+  const zb = document.getElementById('auf_zielgruppe');
+  if (!cb || !zb) return;
+  if (cb.checked) {
+    zb.required = false;
+    zb.placeholder = 'optional — Branche egal: gewerblicher Mittelstand mit Signal';
+  } else {
+    zb.required = true;
+    zb.placeholder = 'echte Branche, z. B. Maschinenbau, IT-Dienstleister — NICHT „Vertrieb“';
   }
 }
 
@@ -2119,14 +2142,17 @@ async function signalSucheStarten() {
     btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
     return;
   }
+  // „Branche egal"-Modus: Zielbranche optional, keine Rollenwort-Prüfung (der ICP ist
+  // bewusst breit — gewerblicher Mittelstand mit Signal).
+  const _brancheEgal = !!(document.getElementById('auf_branche_egal') || {}).checked;
   // Intake-Trennung: die Zielbranche darf kein Rollen-/Signalwort sein („Vertrieb"
   // matcht jede Firma → weiche Ausgabe). Sofort-Feedback; der Server prüft erneut.
   const _zb = document.getElementById('auf_zielgruppe').value.trim();
   const _ROLLEN = ['vertrieb','vertriebler','vertriebsmitarbeiter','sales','salesmanager','verkauf','verkäufer','verkaeufer','akquise','akquisition','kaltakquise','neukundengewinnung','sdr','bdr','terminierer','terminierung','außendienst','aussendienst','innendienst','telesales','telefonakquise','closer','setter','manager','leiter','leitung','mitarbeiter','account','accountmanager'];
   const _zbToks = _zb.toLowerCase().split(/[^a-zäöüß0-9]+/)
     .filter(t => t && !['in','im','für','fuer','und','der','die','das','mit','b2b','b2c','bereich','team'].includes(t));
-  if (_suchModus === 'signal' && _zbToks.length && _zbToks.every(t => _ROLLEN.includes(t))) {
-    msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ &bdquo;${esc(_zb)}&ldquo; ist ein Signal/eine Rolle, keine Branche. Bitte die <b>Zielbranche</b> angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk) — das Kaufsignal wählst du über die Checkboxen.</div>`;
+  if (!_brancheEgal && _suchModus === 'signal' && _zbToks.length && _zbToks.every(t => _ROLLEN.includes(t))) {
+    msg.innerHTML = `<div class="freigabe-result err" style="display:block">⚠️ &bdquo;${esc(_zb)}&ldquo; ist ein Signal/eine Rolle, keine Branche. Bitte die <b>Zielbranche</b> angeben (z. B. Maschinenbau, IT-Dienstleister, Handwerk) — das Kaufsignal wählst du über die Checkboxen. Oder hake „Branche egal" an.</div>`;
     btn.disabled = false; btn.textContent = '⚡ Signal-Suche starten';
     return;
   }
@@ -2136,6 +2162,7 @@ async function signalSucheStarten() {
     anzahl:     parseInt(document.getElementById('auf_anzahl').value, 10) || 0,
     angebot:    document.getElementById('auf_angebot').value.trim(),
     signale:    signale,
+    branche_egal: _brancheEgal,
     linkedin_web: !!(document.getElementById('auf_linkedin_web') || {}).checked,
     linkedin_pro: !!(document.getElementById('auf_linkedin_pro') || {}).checked,
     laender:    laender,

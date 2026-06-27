@@ -314,6 +314,7 @@ class EngineBridge:
         laender=("de",),
         linkedin_web: bool = False,
         linkedin_pro: bool = False,
+        branche_egal: bool = False,
     ) -> EngineBrueckenErgebnis:
         """Sucht Firmen anhand eines Kaufsignals statt flach nach Branche.
 
@@ -444,11 +445,14 @@ class EngineBridge:
         # so wird vor der teuren Personalisierung schon hart gefiltert.
         _nur_premium = str(os.environ.get("SIGNAL_NUR_PREMIUM", "") or "").strip().lower() \
             in ("1", "true", "yes", "ja")
-        # ICP-Fit-Falle (Regel 7): bei Versicherungs-Signalen ist der ICP bewusst
-        # breit (gewerblich + Trigger). Das Gate darf dann nicht alles wegen
-        # Branchen-Abweichung rejecten — abgeleitet aus dem gewählten Signal-Set.
+        # ICP-Fit-Falle (Regel 7): der ICP ist bewusst breit (gewerblicher
+        # Mittelstand + Trigger), wenn entweder (a) der Operator „Branche egal"
+        # gewählt hat (horizontale Angebote wie Kaltakquise) ODER (b) das Signal-Set
+        # ein Versicherungs-Set ist. Dann darf das Gate nicht alles wegen Branchen-
+        # Abweichung rejecten — die harten Regeln 1–6 bleiben voll in Kraft, das
+        # Discovery-Schutznetz (ATS/Groß-Marke/Recruiter) sowieso.
         from product.bridge import angebot_signale as _as
-        _icp_breit = _as.ist_versicherungs_signalset(signal_typen)
+        _icp_breit = bool(branche_egal) or _as.ist_versicherungs_signalset(signal_typen)
         _vor_gate = len(leads)
         leads, gate_zaehlung = _gate_ausgabe(
             leads, ziel=ziel, zielbranche=auftrag.zielgruppe,

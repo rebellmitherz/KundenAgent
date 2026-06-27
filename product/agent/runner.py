@@ -108,6 +108,7 @@ class AgentRunner:
     def signal_suche_im_hintergrund(
         self, auftrag: Auftrag, signal_typ="sales_hiring", laender=("de",),
         *, linkedin_web: bool = False, linkedin_pro: bool = False,
+        branche_egal: bool = False,
     ) -> str:
         """Startet eine Signal-Suche (High-Intent-Targeting) asynchron.
 
@@ -141,7 +142,8 @@ class AgentRunner:
             try:
                 res = self._bridge.suchen_per_signal(
                     auftrag, signal_typ=signal_typ, laender=laender,
-                    linkedin_web=linkedin_web, linkedin_pro=linkedin_pro)
+                    linkedin_web=linkedin_web, linkedin_pro=linkedin_pro,
+                    branche_egal=branche_egal)
                 if res.ok:
                     self._bridge.signal_status_schreiben(
                         "fertig", res.meldung,
