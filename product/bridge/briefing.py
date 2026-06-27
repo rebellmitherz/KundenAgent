@@ -3,7 +3,7 @@
 Bündelt drei Bausteine für den Vertriebsmitarbeiter vor dem Anruf:
   1. Firmen-Kurzprofil  — deterministisch + optionaler LLM-Feinschliff
   2. Gesprächsöffner    — bereits berechneter ``aufhaenger`` (keine Doppelarbeit)
-  3. Einwand-Vorbereitung — 2 signal-passende Einwände + Antworten (0 API-Kosten)
+  3. Einwand-Vorbereitung — lead-spezifische Einwände nach Kategorie (0 API-Kosten)
 
 b2bbot bleibt read-only. Diese Schicht liegt im product/-Layer.
 """
@@ -13,123 +13,103 @@ from typing import Callable, Optional
 
 LLM = Callable[[str], str]
 
-# ─── Einwand-Paare je Signal-Typ (deterministisch, 0 € laufend) ───────────────
+# ─── Lead-spezifische Einwandbehandlung (deterministisch, 0 € laufend) ────────
+# Statt fixer 2 Einwände je Signal: ein Katalog nach 10 Einwand-Kategorien, aus dem
+# pro Lead die wahrscheinlichsten ausgewählt und mit Lead-Feldern interpoliert werden
+# (Firma, Branche, konkretes Kaufsignal, Angebot). So bekommt jeder Lead einen anderen,
+# passenden Satz — kein Template-Spam. Ton: abholend, nie aggressiv, führt zum kleinen
+# nächsten Schritt. (LLM-Verfeinerung später möglich — Hook in ``einwaende_fuer_lead``.)
 
-_EINWAENDE: dict[str, list[dict]] = {
-    "sales_hiring": [
-        {
-            "frage": "Wir haben das intern.",
-            "antwort": "Genau deshalb passen wir zusammen: Wir ergänzen Ihr Team bis der Neue sitzt — und geben dem Neuen von Tag 1 qualifizierte Leads in die Hand.",
-            "ziel": "Ergänzung statt Konkurrenz signalisieren — Budget-Freigabe beschleunigen.",
-            "naechster_schritt": "Darf ich kurz zeigen, wie das in der Praxis bei ähnlichen Teams aussieht? 10 Minuten reichen.",
-            "nicht_sagen": "Ihr internes Team reicht nicht aus / Das kann Ihr Team nicht — löst sofortige Defensivreaktion aus.",
-        },
-        {
-            "frage": "Kein Budget gerade.",
-            "antwort": "Sie stellen gerade eine Vertriebskraft ein — das ist das Budget. Wir kosten einen Bruchteil davon und liefern sofort.",
-            "ziel": "Budget-Einwand als Denkfehler enttarnen — ROI ins Verhältnis zum Sales-Gehalt setzen.",
-            "naechster_schritt": "Darf ich Ihnen ein konkretes Rechenbeispiel schicken — was ein Abschluss bei Ihnen im Schnitt wert ist?",
-            "nicht_sagen": "Wir sind sehr günstig / konkrete Preise nennen — eröffnet Preisgespräch zu früh.",
-        },
-    ],
-    "appointment_setter": [
-        {
-            "frage": "Wir machen die Terminierung selbst.",
-            "antwort": "Das höre ich oft — meistens kostet es die falschen Leute zu viel Zeit. Was wäre, wenn Ihr Team morgen 3 qualifizierte Termine mehr hätte?",
-            "ziel": "Aufwand und Opportunitätskosten bewusst machen — Neugier auf Ergebnisvergleich wecken.",
-            "naechster_schritt": "Was wäre, wenn wir das einfach 2 Wochen parallel laufen lassen? Zahlen sprechen für sich.",
-            "nicht_sagen": "Ihr Prozess ist ineffizient — erzeugt sofort Gegendruck und Defensivhaltung.",
-        },
-        {
-            "frage": "Zu teuer.",
-            "antwort": "Was kostet ein Vertriebler, der täglich kalt akquiriert statt zu verkaufen? Unsere Leads rechnen sich ab dem ersten Abschluss.",
-            "ziel": "Kosten in Relation zu Vertriebskosten setzen — Preis als Investition, nicht als Ausgabe frames.",
-            "naechster_schritt": "Darf ich kurz fragen: Was kostet Sie ein qualifizierter Termin aktuell, alles reingerechnet?",
-            "nicht_sagen": "Sofort Rabatt anbieten oder defensiv auf den Preis eingehen — entwertet das Produkt.",
-        },
-    ],
-    "growth_expansion": [
-        {
-            "frage": "Wir wachsen gerade — kein guter Zeitpunkt.",
-            "antwort": "Wachstumsphasen sind der beste Zeitpunkt: mehr Team bedeutet mehr Umsatzdruck. Saubere Leads jetzt, bevor der Neue sitzt.",
-            "ziel": "Wachstumsphase als Kaufargument umdrehen — jetzt handeln statt später nacharbeiten.",
-            "naechster_schritt": "Genau deshalb: darf ich kurz zeigen, welche Leads gerade für Ihre Wachstumsphase passen?",
-            "nicht_sagen": "Das ist eigentlich der perfekte Zeitpunkt — klingt besserwisserisch, lieber indirekt führen.",
-        },
-        {
-            "frage": "Wir haben genug Kunden.",
-            "antwort": "Super — dann bauen wir die nächste Welle auf. Kaufsignale verfallen schnell. Wer jetzt spricht, kommt als Erster.",
-            "ziel": "Pipeline-Denken wecken — nächste Wachstumswelle rechtzeitig vorbereiten.",
-            "naechster_schritt": "Wann planen Sie die nächste Wachstumsphase? Dann wäre jetzt genau der richtige Moment.",
-            "nicht_sagen": "Das kann sich schnell ändern — klingt bedrohlich, schafft Widerstand.",
-        },
-    ],
-    "marketing_hiring": [
-        {
-            "frage": "Wir bauen das intern auf.",
-            "antwort": "Perfekt — und bis das steht, füllen wir die Pipeline. Kein Widerspruch, wir ergänzen uns.",
-            "ziel": "Übergangs-Lösung anbieten bis Go-live — keine Konkurrenz zum internen Aufbau.",
-            "naechster_schritt": "Wie lange schätzen Sie, bis das intern steht? Bis dahin halten wir die Pipeline am Laufen.",
-            "nicht_sagen": "Interne Lösungen dauern immer länger — provokativ, erzeugt sofort Abwehrhaltung.",
-        },
-        {
-            "frage": "Wir haben schon ein System.",
-            "antwort": "Gut. Wir bringen etwas, das kein System liefert: Firmen, die JETZT kaufen wollen — verifiziert per Kaufsignal.",
-            "ziel": "Kaufsignal-Qualität als Alleinstellungsmerkmal herausstellen — kein System-Vergleich, sondern Ergänzung.",
-            "naechster_schritt": "Darf ich fragen: Wie verifiziert Ihr System aktuell, ob eine Firma JETZT kaufen will?",
-            "nicht_sagen": "Unser System ist besser — System-Vergleich ist eine Falle, die Sie nicht gewinnen.",
-        },
-    ],
-    "leadership_hiring": [
-        {
-            "frage": "Der Neue soll das aufbauen.",
-            "antwort": "Genau — und der Neue wird sich freuen, wenn am ersten Tag qualifizierte Leads auf dem Tisch liegen.",
-            "ziel": "Quick-Win für neue Führungskraft positionieren — Leads als Geschenk, nicht als Konkurrenz.",
-            "naechster_schritt": "Was wäre, wenn der Neue am ersten Tag schon eine fertige Pipeline vorfindet? Das macht einen Eindruck.",
-            "nicht_sagen": "Der Neue braucht erst Zeit — klingt kritisch gegenüber der Entscheidung des Gesprächspartners.",
-        },
-        {
-            "frage": "Erst mal intern klären.",
-            "antwort": "Verstehe. Geben Sie mir 10 Minuten — bis die Stelle besetzt ist, können wir schon erste Ergebnisse zeigen.",
-            "ziel": "Dringlichkeit aufbauen ohne Druck — Kaufsignale verfallen, Timing ist entscheidend.",
-            "naechster_schritt": "Darf ich Ihnen in der Zwischenzeit 2–3 passende Leads zeigen — zur Orientierung, unverbindlich?",
-            "nicht_sagen": "Wie lange dauert das intern? — klingt ungeduldig, erzeugt Druck und Widerstand.",
-        },
-    ],
-    "new_location": [
-        {
-            "frage": "Wir sind noch in der Planung.",
-            "antwort": "Desto besser — jetzt ist die Zeit, die Pipeline für den neuen Standort aufzubauen, bevor Tag 1 kommt.",
-            "ziel": "Planungsphase als idealen Startpunkt verkaufen — Pipeline aufbauen vor Eröffnung.",
-            "naechster_schritt": "Wann ist der geplante Eröffnungstermin? Dann planen wir die Lead-Pipeline rückwärts.",
-            "nicht_sagen": "Dann rufen Sie an, wenn Sie soweit sind — beendet das Gespräch, Momentum geht verloren.",
-        },
-        {
-            "frage": "Kein Budget für den neuen Standort.",
-            "antwort": "Mit dem richtigen Kunden zahlt sich der neue Standort von selbst. Wir liefern die Firmen, die jetzt dort kaufen wollen.",
-            "ziel": "Standort als Investment frames — erste Kunden finanzieren den Standort selbst.",
-            "naechster_schritt": "Wie viele Kunden brauchen Sie, damit sich der Standort rechnet? Genau das liefern wir.",
-            "nicht_sagen": "Budget ist kein Problem bei uns — ignoriert den echten Einwand, wirkt unsensibel.",
-        },
-    ],
+# Kurzer Anlass je Signal: (Satz „weil Sie …", Nomen „die offene Vertriebsstelle").
+_ANLASS_DEFAULT = (
+    "bei Ihnen gerade ein konkretes Geschäftssignal sichtbar ist",
+    "der aktuelle Anlass",
+)
+_ANLASS: dict[str, tuple[str, str]] = {
+    "sales_hiring":       ("Sie gerade im Vertrieb einstellen", "die offene Vertriebsstelle"),
+    "appointment_setter": ("Sie gerade Ihre Terminierung ausbauen", "der Ausbau Ihrer Terminierung"),
+    "growth_expansion":   ("Sie gerade wachsen und Ihr Team ausbauen", "Ihre aktuelle Wachstumsphase"),
+    "marketing_hiring":   ("Sie gerade in Marketing und Leadgewinnung investieren", "Ihre Marketing-Investition"),
+    "leadership_hiring":  ("Sie gerade eine neue Vertriebs- oder Marketingleitung holen", "Ihre neue Führungsrolle"),
+    "new_location":       ("Sie gerade einen neuen Standort aufbauen", "Ihr neuer Standort"),
 }
 
-_EINWAENDE_FALLBACK = [
-    {
-        "frage": "Wir haben das intern.",
-        "antwort": "Gut — wir ergänzen Ihr internes Team mit Leads, die wirklich kaufen wollen. Kein Widerspruch.",
-        "ziel": "Ergänzungsnutzen herausstellen — keine Konkurrenz, sondern Hebelwirkung für das bestehende Team.",
-        "naechster_schritt": "Darf ich zeigen, welche Leads aktuell zu Ihrem Setup passen?",
-        "nicht_sagen": "Intern reicht das nicht — erzeugt sofortige Abwehrhaltung.",
+# Einwand-Katalog nach Kategorie. antwort/ziel/naechster_schritt dürfen die Platzhalter
+# {firma} {anlass_satz} {anlass_noun} {branche_phrase} {angebot_phrase} nutzen (immer gesetzt).
+_EINWAND_KATALOG: dict[str, dict] = {
+    "interner_aufbau": {
+        "frage": "Wir bauen das gerade intern auf.",
+        "antwort": "Perfekt — dann geht es nicht um Ersatz, sondern um Ergänzung. Ihr Aufbau läuft weiter, wir liefern nur Firmen, bei denen gerade ein konkreter Anlass sichtbar ist.",
+        "ziel": "Von Konkurrenz auf Ergänzung umlenken.",
+        "naechster_schritt": "Darf ich Ihnen ein, zwei passende Signale zeigen — ganz ohne dass Sie etwas umstellen?",
     },
-    {
-        "frage": "Kein Budget gerade.",
-        "antwort": "Was wäre, wenn ein Lead den nächsten Kunden bringt? Dann rechnet es sich sofort.",
-        "ziel": "ROI-Perspektive öffnen — ein Abschluss rechtfertigt die Investition sofort.",
-        "naechster_schritt": "Darf ich kurz fragen: Was wäre ein Abschluss bei Ihnen wert? Dann rechnen wir kurz zusammen.",
-        "nicht_sagen": "Sofort Preis nennen oder nachgeben — entwertet das Angebot dauerhaft.",
+    "kein_bedarf": {
+        "frage": "Aktuell haben wir keinen akuten Bedarf.",
+        "antwort": "Verstehe. Genau deshalb geht es nicht um Masse, sondern um wenige geprüfte Signale rund um {angebot_phrase}. Entsteht daraus kein echter Gesprächsanlass, ist es auch keins.",
+        "ziel": "Druck rausnehmen, Qualität vor Menge stellen.",
+        "naechster_schritt": "Soll ich mich nur melden, wenn ein Signal wirklich zu {firma} passt?",
     },
-]
+    "budget": {
+        "frage": "Budget ist gerade knapp.",
+        "antwort": "Nachvollziehbar. Dann fangen wir klein an — ein, zwei geprüfte Kontakte, an denen Sie sehen, ob sich der Aufwand für Sie überhaupt rechnet.",
+        "ziel": "Einstieg verkleinern, Risiko senken.",
+        "naechster_schritt": "Wäre ein kleiner Test mit wenigen Signalen für Sie ein fairer erster Schritt?",
+    },
+    "keine_zeit": {
+        "frage": "Gerade keine Zeit — vielleicht später.",
+        "antwort": "Klar, das Timing muss passen. Kaufsignale sind nur leider zeitkritisch — ich kann Ihnen die relevanten Firmen vormerken, bis Sie Luft haben.",
+        "ziel": "Dringlichkeit ohne Druck, Tür offen halten.",
+        "naechster_schritt": "Wann darf ich mich kurz wieder melden — in zwei Wochen?",
+    },
+    "zustaendigkeit": {
+        "frage": "Dafür bin ich nicht der Richtige.",
+        "antwort": "Danke für die Offenheit. Wer kümmert sich bei {firma} um neue Kundenkontakte? Dann bringe ich es direkt an die passende Stelle.",
+        "ziel": "Sauber zur entscheidenden Person leiten.",
+        "naechster_schritt": "Dürfen Sie mir kurz sagen, wer dafür der richtige Ansprechpartner ist?",
+    },
+    "vertrauen_qualitaet": {
+        "frage": "Woher kommen die Daten — taugt die Qualität?",
+        "antwort": "Berechtigte Frage. Anlass ist {anlass_noun} — ein öffentlich sichtbares Signal, keine gekaufte Liste. Die Quelle sehen Sie zu jedem Kontakt.",
+        "ziel": "Mit Nachweis Vertrauen schaffen.",
+        "naechster_schritt": "Soll ich Ihnen an einem Beispiel zeigen, wie ein Signal belegt ist?",
+    },
+    "rechtlich": {
+        "frage": "Wie sieht das rechtlich aus?",
+        "antwort": "Wichtiger Punkt. Wir arbeiten mit öffentlich belegten Geschäftssignalen und Firmendaten — Sie entscheiden, wen Sie auf welcher Grundlage ansprechen.",
+        "ziel": "Bedenken ernst nehmen, Kontrolle beim Kunden lassen.",
+        "naechster_schritt": "Soll ich kurz zeigen, welche Daten genau enthalten sind?",
+    },
+    "bestehender_dienstleister": {
+        "frage": "Wir haben dafür schon einen Dienstleister.",
+        "antwort": "Gut, dann steht die Basis. Wir verdrängen niemanden — wir liefern nur dort, wo gerade ein frischer Anlass sichtbar ist, als Ergänzung zum Bestehenden.",
+        "ziel": "Nicht ersetzen, sondern ergänzen.",
+        "naechster_schritt": "Darf ich zeigen, wo wir den bestehenden Weg sinnvoll ergänzen?",
+    },
+    "unterlagen": {
+        "frage": "Schicken Sie mir einfach Unterlagen.",
+        "antwort": "Mache ich gern — damit es nicht im Postfach untergeht, passe ich es kurz auf {firma} an. Zwei Sätze zu Ihrer Situation reichen mir.",
+        "ziel": "Brush-off in ein Mini-Gespräch wandeln.",
+        "naechster_schritt": "Worauf soll ich beim Zuschicken besonders eingehen?",
+    },
+    "skepsis_kalt": {
+        "frage": "Von Kaltakquise halte ich wenig.",
+        "antwort": "Verstehe ich — die meisten Anrufe kommen grundlos. Hier ist es umgekehrt: ich melde mich, weil {anlass_satz} — ein aktueller, sichtbarer Anlass, kein Zufall.",
+        "ziel": "Vom Kalt-Klischee abgrenzen.",
+        "naechster_schritt": "Darf ich Ihnen das eine konkrete Signal nennen, das mich auf Sie gebracht hat?",
+    },
+}
+
+# Pro Signal: [wahrscheinlichster Einwand (Top), … Pool für „Weitere"]. Aus dem Pool
+# werden je Lead rotierend einige gewählt (variiert pro Firma) — der Top bleibt stabil.
+_SIGNAL_EINWAND_PLAN: dict[str, list[str]] = {
+    "sales_hiring":       ["interner_aufbau", "bestehender_dienstleister", "kein_bedarf", "skepsis_kalt", "zustaendigkeit", "unterlagen"],
+    "appointment_setter": ["bestehender_dienstleister", "interner_aufbau", "budget", "vertrauen_qualitaet", "keine_zeit", "skepsis_kalt"],
+    "growth_expansion":   ["keine_zeit", "kein_bedarf", "budget", "interner_aufbau", "unterlagen", "skepsis_kalt"],
+    "marketing_hiring":   ["bestehender_dienstleister", "zustaendigkeit", "vertrauen_qualitaet", "kein_bedarf", "keine_zeit", "unterlagen"],
+    "leadership_hiring":  ["zustaendigkeit", "keine_zeit", "interner_aufbau", "kein_bedarf", "unterlagen", "skepsis_kalt"],
+    "new_location":       ["kein_bedarf", "keine_zeit", "budget", "vertrauen_qualitaet", "skepsis_kalt", "unterlagen"],
+}
+_FALLBACK_PLAN = ["kein_bedarf", "interner_aufbau", "budget", "keine_zeit", "skepsis_kalt", "vertrauen_qualitaet"]
 
 # ─── Signal → Warum-jetzt-Satz ────────────────────────────────────────────────
 
@@ -196,33 +176,91 @@ def firmen_kurzprofil(lead: dict, *, llm: Optional[LLM] = None) -> str:
         return basis
 
 
-# ─── Öffentliche API ──────────────────────────────────────────────────────────
+# ─── Einwand-Generierung (lead-spezifisch) ────────────────────────────────────
 
-def einwaende_fuer_signal(signal_typ: str) -> list[dict]:
-    """2 signal-passende Einwände + Antworten. Deterministisch, 0 € laufend."""
-    key = (signal_typ or "").strip().lower()
-    return list(_EINWAENDE.get(key, _EINWAENDE_FALLBACK))
-
-
-def briefing_erstellen(lead: dict, *, llm: Optional[LLM] = None) -> dict:
-    """Bündelt Kurzprofil, Opener und Einwände für einen Lead.
-
-    Rückgabe: {kurzprofil: str, opener: str, einwaende: [{frage, antwort}, …]}
-    ``opener`` liest ``lead["aufhaenger"]`` — wird von ``_signal_leads_personalisieren``
-    bereits befüllt, keine Doppelarbeit.
-    """
+def _einwand_ctx(lead: dict, angebot: str) -> dict:
+    """Platzhalter-Werte aus dem Lead-Kontext — alle immer gesetzt (keine Leerstellen)."""
+    firma = (lead.get("company_name") or "").strip() or "das Unternehmen"
     signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
+    anlass_satz, anlass_noun = _ANLASS.get(signal, _ANLASS_DEFAULT)
+    branche = lead.get("industry") or lead.get("ind_tokens") or ""
+    if isinstance(branche, list):
+        branche = ", ".join(str(b) for b in branche[:2])
+    branche = str(branche).strip()
+    branche_phrase = f"gerade in {branche}" if branche else "gerade bei vergleichbaren Firmen"
+    ang = (angebot or "").strip()
+    angebot_phrase = ang if ang and ang not in ("—", "-") else "Ihr Kerngeschäft"
     return {
-        "kurzprofil": firmen_kurzprofil(lead, llm=llm),
-        "opener": (lead.get("aufhaenger") or "").strip(),
-        "einwaende": einwaende_fuer_signal(signal),
+        "firma": firma,
+        "anlass_satz": anlass_satz,
+        "anlass_noun": anlass_noun,
+        "branche_phrase": branche_phrase,
+        "angebot_phrase": angebot_phrase,
     }
 
 
-def anreichern(leads: list[dict], *, llm: Optional[LLM] = None) -> None:
+def _fmt_einwand(kategorie: str, ctx: dict) -> dict:
+    """Einen Katalog-Einwand mit dem Lead-Kontext füllen."""
+    t = _EINWAND_KATALOG.get(kategorie) or _EINWAND_KATALOG["kein_bedarf"]
+    def _f(s: str) -> str:
+        try:
+            return s.format(**ctx)
+        except Exception:
+            return s
+    return {
+        "frage": t["frage"],
+        "antwort": _f(t["antwort"]),
+        "ziel": _f(t["ziel"]),
+        "naechster_schritt": _f(t["naechster_schritt"]),
+    }
+
+
+def einwaende_fuer_lead(lead: dict, *, angebot: str = "", anzahl: int = 5) -> list[dict]:
+    """Lead-spezifische Einwände: wahrscheinlichster zuerst, danach pro Firma variierte
+    „Weitere". Jeder Einwand: ``{frage, antwort, ziel, naechster_schritt}``.
+
+    Deterministisch (0 €): Auswahl + Reihenfolge ergeben sich aus Signal und Firmenname,
+    die Texte werden mit Firma/Branche/Anlass/Angebot interpoliert. Kein Template-Spam —
+    zwei Firmen mit gleichem Signal bekommen unterschiedliche „Weitere"-Sets.
+    """
+    signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
+    plan = _SIGNAL_EINWAND_PLAN.get(signal, _FALLBACK_PLAN)
+    top, pool = plan[0], list(plan[1:])
+    # Pro Firma rotieren, damit die „Weiteren" variieren (Top bleibt = wahrscheinlichster).
+    firma = (lead.get("company_name") or "").strip()
+    if pool:
+        start = (sum(ord(c) for c in firma) % len(pool)) if firma else 0
+        pool = pool[start:] + pool[:start]
+    chosen = [top] + pool[: max(int(anzahl) - 1, 0)]
+    ctx = _einwand_ctx(lead, angebot)
+    return [_fmt_einwand(k, ctx) for k in chosen]
+
+
+def einwaende_fuer_signal(signal_typ: str) -> list[dict]:
+    """Rückwärts-kompatibel: Einwände für ein Signal ohne weiteren Lead-Kontext."""
+    return einwaende_fuer_lead({"entdeckt_per_signal": signal_typ})
+
+
+# ─── Öffentliche API ──────────────────────────────────────────────────────────
+
+def briefing_erstellen(lead: dict, *, angebot: str = "", llm: Optional[LLM] = None) -> dict:
+    """Bündelt Kurzprofil, Opener und lead-spezifische Einwände für einen Lead.
+
+    Rückgabe: ``{kurzprofil, opener, einwaende: [{frage, antwort, ziel, naechster_schritt}, …]}``
+    ``opener`` liest ``lead["aufhaenger"]`` — wird von ``_signal_leads_personalisieren``
+    bereits befüllt, keine Doppelarbeit. ``angebot`` fließt in die Einwand-Antworten ein.
+    """
+    return {
+        "kurzprofil": firmen_kurzprofil(lead, llm=llm),
+        "opener": (lead.get("aufhaenger") or "").strip(),
+        "einwaende": einwaende_fuer_lead(lead, angebot=angebot),
+    }
+
+
+def anreichern(leads: list[dict], *, angebot: str = "", llm: Optional[LLM] = None) -> None:
     """Hängt ``briefing`` an jeden Lead. Ein Fehler darf nichts kippen."""
     for lead in leads:
         try:
-            lead["briefing"] = briefing_erstellen(lead, llm=llm)
+            lead["briefing"] = briefing_erstellen(lead, angebot=angebot, llm=llm)
         except Exception:
             lead.setdefault("briefing", {"kurzprofil": "", "opener": "", "einwaende": []})

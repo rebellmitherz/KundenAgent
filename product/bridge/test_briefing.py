@@ -19,37 +19,70 @@ def _lead(signal: str = "sales_hiring", aufhaenger: str = "", **extra) -> dict:
     return base
 
 
-# ─── einwaende_fuer_signal ────────────────────────────────────────────────────
+# ─── einwaende_fuer_lead / einwaende_fuer_signal ──────────────────────────────
 
-def test_einwaende_bekanntes_signal():
+def test_einwaende_struktur_vollstaendig():
     e = br.einwaende_fuer_signal("sales_hiring")
-    assert len(e) == 2
-    assert all("frage" in x and "antwort" in x for x in e)
+    assert len(e) >= 3
+    for x in e:
+        assert {"frage", "antwort", "ziel", "naechster_schritt"} <= set(x)
+        assert x["antwort"] and x["naechster_schritt"]
 
 
-def test_einwaende_alle_signale():
+def test_einwaende_alle_signale_liefern_mehrere():
     for sig in [
         "sales_hiring", "appointment_setter", "growth_expansion",
         "marketing_hiring", "leadership_hiring", "new_location",
     ]:
         e = br.einwaende_fuer_signal(sig)
-        assert len(e) == 2, f"Kein Einwand-Paar für {sig}"
+        assert len(e) >= 3, f"Zu wenige Einwände für {sig}"
 
 
 def test_einwaende_fallback_unbekannt():
-    e = br.einwaende_fuer_signal("unbekannt_xyz")
-    assert len(e) == 2
+    assert len(br.einwaende_fuer_signal("unbekannt_xyz")) >= 3
 
 
 def test_einwaende_leer():
-    e = br.einwaende_fuer_signal("")
-    assert len(e) == 2
+    assert len(br.einwaende_fuer_signal("")) >= 3
 
 
 def test_einwaende_grossschreibung_ignoriert():
-    e = br.einwaende_fuer_signal("SALES_HIRING")
-    assert len(e) == 2
-    assert e[0]["frage"] == br.einwaende_fuer_signal("sales_hiring")[0]["frage"]
+    assert (br.einwaende_fuer_signal("SALES_HIRING")[0]["frage"]
+            == br.einwaende_fuer_signal("sales_hiring")[0]["frage"])
+
+
+def test_einwaende_top_ist_signal_spezifisch():
+    # sales_hiring → interner Aufbau ist der wahrscheinlichste Einwand
+    assert "intern" in br.einwaende_fuer_lead(_lead("sales_hiring"))[0]["frage"].lower()
+    # new_location → kein akuter Bedarf
+    assert "bedarf" in br.einwaende_fuer_lead(_lead("new_location"))[0]["frage"].lower()
+
+
+def test_einwaende_variieren_pro_firma():
+    # Gleiches Signal, verschiedene Firmen → nicht alle bekommen dasselbe „Weitere"-Set.
+    namen = ["Alpha GmbH", "Beta AG", "Gamma KG", "Delta SE", "Omega Werke"]
+    sets = {
+        tuple(x["frage"] for x in br.einwaende_fuer_lead(_lead("sales_hiring", company_name=n))[1:])
+        for n in namen
+    }
+    assert len(sets) >= 2
+    # Der Top (wahrscheinlichster) bleibt über alle Firmen stabil.
+    tops = {br.einwaende_fuer_lead(_lead("sales_hiring", company_name=n))[0]["frage"] for n in namen}
+    assert len(tops) == 1
+
+
+def test_einwaende_interpolation_firma_und_angebot():
+    e = br.einwaende_fuer_lead(_lead("new_location", company_name="Muster AG"), angebot="SEO-Pakete")
+    text = " ".join(x["antwort"] + " " + x["naechster_schritt"] for x in e)
+    assert "Muster AG" in text       # {firma} wird interpoliert
+    assert "SEO-Pakete" in text       # {angebot_phrase} (new_location-Top = kein_bedarf)
+
+
+def test_einwaende_keine_offenen_platzhalter():
+    e = br.einwaende_fuer_lead(_lead("growth_expansion", company_name="X GmbH"), angebot="Webdesign")
+    for x in e:
+        for feld in ("antwort", "ziel", "naechster_schritt"):
+            assert "{" not in x[feld] and "}" not in x[feld]
 
 
 # ─── firmen_kurzprofil ────────────────────────────────────────────────────────
@@ -120,15 +153,23 @@ def test_briefing_opener_leer_wenn_kein_aufhaenger():
     assert b["opener"] == ""
 
 
-def test_briefing_einwaende_passend():
-    b = br.briefing_erstellen(_lead("new_location"))
-    assert b["einwaende"] == br.einwaende_fuer_signal("new_location")
+def test_briefing_einwaende_lead_spezifisch():
+    b = br.briefing_erstellen(_lead("new_location", company_name="Standort GmbH"))
+    assert len(b["einwaende"]) >= 3
+    # Top passend zum Signal (new_location → kein akuter Bedarf)
+    assert "bedarf" in b["einwaende"][0]["frage"].lower()
+
+
+def test_briefing_angebot_fliesst_in_einwaende():
+    b = br.briefing_erstellen(_lead("new_location"), angebot="Photovoltaik-Anlagen")
+    text = " ".join(e["antwort"] for e in b["einwaende"])
+    assert "Photovoltaik-Anlagen" in text
 
 
 def test_briefing_ohne_signal():
     lead = {"company_name": "NoSignal AG", "entdeckt_per_signal": ""}
     b = br.briefing_erstellen(lead)
-    assert len(b["einwaende"]) == 2
+    assert len(b["einwaende"]) >= 3
 
 
 # ─── anreichern ──────────────────────────────────────────────────────────────
