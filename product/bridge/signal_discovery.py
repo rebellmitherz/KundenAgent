@@ -576,9 +576,11 @@ def _build_signal_queries(
     city = (city or "").strip()
     laender = _laender_normalisieren(laender)
 
-    # Bewährter Engine-Builder NUR für den DE+Stadt-Fall von sales/growth
-    # (unverändert — der erprobte Pfad). Sonst Produkt-Layer (Land/ohne Stadt).
-    if st in ("sales_hiring", "growth_expansion") and city and laender == ("de",):
+    industry = (industry or "").strip()
+
+    # Bewährter Engine-Builder NUR für den DE+Stadt-Fall von sales/growth MIT Branche
+    # (unverändert — der erprobte Pfad). Sonst Produkt-Layer (Land/ohne Stadt/Branche egal).
+    if st in ("sales_hiring", "growth_expansion") and industry and city and laender == ("de",):
         from modules.intent_job_detail_query_builder import build_job_detail_queries
         return build_job_detail_queries(industry, city, st, relevance_focus="broad")
 
@@ -586,10 +588,10 @@ def _build_signal_queries(
     if not kws:
         raise ValueError(f"Unbekannter signal_type: {signal_type!r}. Bekannt: {sorted(SIGNAL_TYPES)}")
 
-    industry = (industry or "").strip()
-    if not industry:
-        raise ValueError("Zielgruppe/Branche darf nicht leer sein.")
-
+    # „Branche egal": ohne Zielbranche wird signal-only gesucht — nur das Kaufsignal-
+    # Keyword + Portal (ggf. Stadt). Die Branche filtert dann nicht mehr (gewollt). Der
+    # normale Pfad liefert hier immer eine Branche (server-seitig Pflicht), nur der
+    # explizite Branche-egal-Modus erreicht den leeren Fall.
     base = " ".join(p for p in [industry, city] if p).strip()
     templates = _portal_templates_fuer(laender)
 

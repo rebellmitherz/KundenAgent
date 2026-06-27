@@ -317,6 +317,20 @@ def test_build_queries_sales_ohne_stadt_nutzt_produkt_builder():
     assert q and any("karriere.at" in x for x in q)
 
 
+def test_build_queries_branche_egal_signal_only():
+    # „Branche egal": ohne Zielbranche UND ohne Stadt wird signal-only gesucht — die
+    # Query kommt trotzdem (Portal + Kaufsignal-Keyword), KEIN Abbruch (früher: raise).
+    q = sd._build_signal_queries("", "", "sales_hiring", ("de",))
+    assert q, "leere Branche darf keine Exception werfen, sondern signal-only suchen"
+    assert any("stepstone.de" in x for x in q)
+
+
+def test_build_queries_branche_egal_mit_stadt():
+    # Branche egal + Stadt: die Stadt bleibt als Filter erhalten, nur die Branche entfällt.
+    q = sd._build_signal_queries("", "Berlin", "appointment_setter", ("de",))
+    assert q and all("Berlin" in x for x in q)
+
+
 def test_fit_ohne_stadt_rebalanciert():
     # Starker Branchen+Signal-Treffer ohne Stadt erreicht target_fit (Stadt-Gewicht umverteilt).
     score, status = sd._fit_bewerten(
