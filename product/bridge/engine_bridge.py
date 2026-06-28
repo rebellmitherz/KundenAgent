@@ -805,7 +805,11 @@ class EngineBridge:
     # --- Signal-Status (für asynchrone UI-Anzeige) ------------------------
 
     def _signal_status_pfad(self) -> Path:
-        return self._output_dir() / "latest" / "signal_status.json"
+        # BEWUSST im output/-Stamm, NICHT in latest/: der interne Enrich-Lauf
+        # ersetzt latest/ komplett und würde einen dort liegenden „läuft"-Status
+        # mitten im Lauf löschen → UI zeigt minutenlang nichts (wirkt wie „kaputt").
+        # Im Stamm überlebt der Status den Enrich; die UI zeigt durchgehend „läuft".
+        return self._output_dir() / "signal_status.json"
 
     def signal_status_schreiben(self, status: str, meldung: str = "", extra: Optional[dict] = None) -> None:
         """Schreibt den aktuellen Stand der Signal-Suche (laeuft|fertig|fehler)."""
