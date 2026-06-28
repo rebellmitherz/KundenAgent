@@ -100,10 +100,31 @@ def test_nur_rollen_mail_ohne_telefon_ist_review():
     assert r["klasse"] == pg.REVIEW
 
 
-def test_rollen_mail_mit_telefon_bleibt_premium():
-    lead = _premium_lead(email="info@echte-firma.de")  # Telefon bleibt gesetzt
+def test_rollen_mail_mit_telefon_und_echtem_ap_bleibt_premium():
+    # Rollen-Mail + Telefon ist nur dann PREMIUM, wenn ein ECHTER, benannter
+    # Ansprechpartner da ist (Call-First). Hier: „Anna Beispiel".
+    lead = _premium_lead(email="info@echte-firma.de")  # Telefon + AP bleiben gesetzt
     r = pg.bewerten_premium(lead, zielbranche="Maschinenbau")
     assert r["klasse"] == pg.PREMIUM
+
+
+def test_rollen_mail_mit_telefon_ohne_ansprechpartner_nicht_premium():
+    # Rollen-Mail + Zentrale-Telefon ohne benannten Ansprechpartner → nicht
+    # belastbar genug für PREMIUM (das universelle Hauptleck).
+    lead = _premium_lead(email="info@echte-firma.de", contact_full_name="",
+                         managing_director="", contact_person="")
+    r = pg.bewerten_premium(lead, zielbranche="Maschinenbau")
+    assert r["klasse"] != pg.PREMIUM
+
+
+def test_funktions_name_als_ansprechpartner_nicht_premium():
+    # „Regionaldirektion Bayern"/„Zentrale" = Abteilung/Funktion, kein echter
+    # Ansprechpartner → mit Rollen-Mail kein PREMIUM.
+    for fake in ("Regionaldirektion Bayern", "Zentrale", "Angaben May und Olde"):
+        lead = _premium_lead(email="info@echte-firma.de", contact_full_name=fake,
+                             managing_director="", contact_person="")
+        r = pg.bewerten_premium(lead, zielbranche="Maschinenbau")
+        assert r["klasse"] != pg.PREMIUM, fake
 
 
 def test_gar_kein_kontakt_ist_reject():

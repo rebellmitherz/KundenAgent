@@ -216,6 +216,14 @@ def _kontakt_lage(lead: dict) -> dict:
     pers = bool(mail) and ist_persoenliche_mail(mail, name)
     local = mail.split("@", 1)[0].lower() if "@" in mail else ""
     hart_raus = (not pers) and bool(_tokens(local) & _MAIL_HART_RAUS)
+    # Echter Ansprechpartner = Name vorhanden UND kein Artefakt/Funktion/Abteilung.
+    name_clean = (name or "").strip()
+    try:
+        from product.bridge.signal_contact_enrich import _ist_mull_name
+        name_artefakt = bool(name_clean) and _ist_mull_name(name_clean)
+    except Exception:
+        name_artefakt = False
+    hat_echten_ap = bool(name_clean) and not name_artefakt
     return {
         "hat_telefon": bool(tel),
         "ist_mobil": ist_mobilnummer(tel),
@@ -224,6 +232,8 @@ def _kontakt_lage(lead: dict) -> dict:
         "nur_rollen_mail": bool(mail) and not pers,
         "mail_hart_raus": hart_raus,
         "mail_prefix": local,
+        "hat_echten_ap": hat_echten_ap,
+        "name_artefakt": name_artefakt,
         "kein_kontakt": not tel and not mail,
     }
 
@@ -354,9 +364,21 @@ def _bewerten(lead: dict, zielbranche: str, icp_breit: bool = False) -> dict:
         # No-Sales-Postfach trotz Telefon: nie PREMIUM, der Mail-Kanal ist unbrauchbar.
         premium_miss.append(f"E-Mail ist ein No-Sales-Postfach „{k['mail_prefix']}@“ — nur telefonisch kontaktierbar")
         abzug += 15
-    elif not k["hat_telefon"] and not k["persoenliche_mail"]:
-        # nur eine Rollen-/Sammel-Mail, kein Telefon → nicht belastbar genug.
-        premium_miss.append("nur Rollen-/Sammel-Mail, kein Telefon — Kontakt nicht belastbar genug")
+    elif k["persoenliche_mail"]:
+        # Persönliche Mail = belastbarer Personenkanal → stark genug für PREMIUM.
+        pass
+    elif k["hat_telefon"] and k["hat_echten_ap"]:
+        # Echter, benannter Ansprechpartner + Telefon = belastbar (Call-First).
+        pass
+    else:
+        # Nur Rollen-/Sammel-Mail bzw. Telefon ohne echten Ansprechpartner
+        # (oder Artefakt-/Abteilungs-„Name") → kein belastbarer Personenkontakt.
+        if k["name_artefakt"]:
+            premium_miss.append("Ansprechpartner ist kein echter Name (Abteilung/Artefakt) — kein belastbarer Personenkontakt")
+        elif not k["hat_telefon"]:
+            premium_miss.append("nur Rollen-/Sammel-Mail, kein Telefon — Kontakt nicht belastbar genug")
+        else:
+            premium_miss.append("nur Rollen-/Sammel-Mail + Telefon, kein echter Ansprechpartner — nicht send-fertig (Call-First)")
         abzug += 15
 
     # Regel 2 — Frische des Belegs.

@@ -133,3 +133,116 @@ def test_gate_ausgabe_branche_egal_haelt_harte_regeln():
     leads = [_premium(website="")]
     aus, z = eb._gate_ausgabe(leads, ziel=10, zielbranche="", icp_breit=True)
     assert z[pg.REJECT] == 1 and len(aus) == 0
+
+
+# ── Eskalations-Helfer (Teil 2: länger/breiter suchen bis genug PREMIUM) ──────
+def test_signal_max_stufen_default_und_cap(monkeypatch):
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    assert eb._signal_max_stufen() == 2
+    monkeypatch.setenv("SIGNAL_MAX_STUFEN", "9")
+    assert eb._signal_max_stufen() == 3          # hart auf 3 gedeckelt
+    monkeypatch.setenv("SIGNAL_MAX_STUFEN", "0")
+    assert eb._signal_max_stufen() == 1          # mind. 1
+    monkeypatch.setenv("SIGNAL_MAX_STUFEN", "xx")
+    assert eb._signal_max_stufen() == 2          # defensiv → Default
+
+
+def test_signal_ziel_premium_default_und_env(monkeypatch):
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    assert eb._signal_ziel_premium(20) == 20     # Default = bestellte Menge
+    monkeypatch.setenv("SIGNAL_ZIEL_PREMIUM", "5")
+    assert eb._signal_ziel_premium(20) == 5
+    monkeypatch.setenv("SIGNAL_ZIEL_PREMIUM", "abc")
+    assert eb._signal_ziel_premium(20) == 20     # defensiv → Default
+
+
+def test_stufen_plan_stadt_dann_deutschlandweit():
+    assert eb._stufen_plan("Berlin", 2) == ["Berlin", ""]
+
+
+def test_stufen_plan_ohne_stadt_nur_deutschlandweit():
+    assert eb._stufen_plan("", 2) == [""]
+    assert eb._stufen_plan("   ", 2) == [""]
+
+
+def test_stufen_plan_kuerzt_auf_max():
+    assert eb._stufen_plan("Berlin", 1) == ["Berlin"]   # nur Stadt, kein DE-weit
+
+
+def test_hat_kontakt():
+    assert eb._hat_kontakt({"email": "a@b.de"})
+    assert eb._hat_kontakt({"phone": "+49 30 1"})
+    assert not eb._hat_kontakt({"email": "", "phone": ""})
+    assert not eb._hat_kontakt({})
+
+
+# ── Eskalations-Schleife (mit gestubbter Stufe, ohne Netz) ───────────────────
+class _FakeFirma:
+    def __init__(self, name="X", website="https://x.de"):
+        self.firma, self.website = name, website
+    def als_dict(self):
+        return {"firma": self.firma}
+
+
+class _FakeAuftrag:
+    def __init__(self, region, ziel=2, zielgruppe="Maschinenbau"):
+        self.region, self.lead_anzahl, self.zielgruppe = region, ziel, zielgruppe
+        self.angebot = ""
+    def starten(self):
+        pass
+    def fehler_setzen(self, m):
+        self.fehler = m
+
+
+def _stub_bridge(stufen_ergebnisse):
+    """EngineBruecke ohne __init__ (kein mine.py nötig); Stufe + Downstream gestubbt."""
+    b = object.__new__(eb.EngineBridge)
+    b.engine_dir = __import__("pathlib").Path(".")
+    calls = []
+
+    def fake_stufe(auftrag, signal_typen, *, ort, roh_ziel, cached_report, laender,
+                   linkedin_web, linkedin_pro, seen_hosts, such_diag):
+        calls.append(ort)
+        return stufen_ergebnisse.pop(0) if stufen_ergebnisse else ([], [])
+
+    b._signal_stufe = fake_stufe
+    b._pruefen = lambda *a, **k: None
+    b._signal_leads_personalisieren = lambda *a, **k: None
+    b._signal_briefing_erstellen = lambda *a, **k: None
+    b._signal_leads_schreiben = lambda *a, **k: None
+    return b, calls
+
+
+def test_eskalation_stoppt_wenn_genug_premium(monkeypatch):
+    # Stadt-Stufe liefert genug PREMIUM → KEINE deutschlandweite Nachsuche (spart Geld).
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    b, calls = _stub_bridge([([_premium(), _premium()], [_FakeFirma(), _FakeFirma()])])
+    res = b.suchen_per_signal(_FakeAuftrag("Berlin", ziel=2), "sales_hiring")
+    assert res.ok and res.leads_sauber == 2
+    assert calls == ["Berlin"]          # nur Stufe 1, nicht ausgeweitet
+
+
+def test_eskalation_weitet_deutschlandweit_aus(monkeypatch):
+    # Stadt-Stufe liefert zu wenig → automatisch deutschlandweit nachgesucht,
+    # Leads akkumulieren über die Stufen.
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    b, calls = _stub_bridge([
+        ([_premium()], [_FakeFirma("A")]),        # Stufe 1 (Berlin): 1 PREMIUM < 2
+        ([_premium()], [_FakeFirma("B")]),        # Stufe 2 (DE-weit): +1 → 2 ≥ 2
+    ])
+    res = b.suchen_per_signal(_FakeAuftrag("Berlin", ziel=2), "sales_hiring")
+    assert res.ok and res.leads_sauber == 2
+    assert calls == ["Berlin", ""]      # Stadt → deutschlandweit
+
+
+def test_eskalation_ohne_stadt_nur_eine_stufe(monkeypatch):
+    # Ohne Stadt gibt es nur die deutschlandweite Stufe — auch wenn zu wenig PREMIUM,
+    # wird nicht weiter ausgeweitet (kein weiterer Ort übrig).
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    b, calls = _stub_bridge([([_premium()], [_FakeFirma()])])
+    res = b.suchen_per_signal(_FakeAuftrag("", ziel=5), "sales_hiring")
+    assert res.ok and res.leads_sauber == 1
+    assert calls == [""]

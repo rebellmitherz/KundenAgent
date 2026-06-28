@@ -60,6 +60,49 @@ def _uebersuch_roh_ziel(ziel: int) -> int:
     return max(ziel, min(int(round(ziel * max(faktor, 1.0))), cap))
 
 
+def _signal_max_stufen() -> int:
+    """Max. Such-Stufen der Eskalation (Stadt → deutschlandweit). Default 2,
+    per Env ``SIGNAL_MAX_STUFEN`` steuerbar; hart gedeckelt auf [1, 3], damit eine
+    Suche niemals ausufert (jede Stufe = eigener Enrich-Lauf = Zeit/SERPER)."""
+    try:
+        n = int(os.environ.get("SIGNAL_MAX_STUFEN", "2") or 2)
+    except (TypeError, ValueError):
+        n = 2
+    return max(1, min(n, 3))
+
+
+def _signal_ziel_premium(ziel: int) -> int:
+    """Wie viele echte PREMIUM angepeilt werden, bevor die Eskalation stoppt.
+    Default = die bestellte Zielmenge (so wird so lange/breit gesucht, bis genug
+    A-Leads da sind); per Env ``SIGNAL_ZIEL_PREMIUM`` überschreibbar."""
+    try:
+        env = (os.environ.get("SIGNAL_ZIEL_PREMIUM", "") or "").strip()
+        if env:
+            return max(1, int(env))
+    except (TypeError, ValueError):
+        pass
+    return max(1, int(ziel or 1))
+
+
+def _stufen_plan(stadt: str, max_stufen: int) -> list[str]:
+    """Such-Stufen als Ortsliste: erst die gewählte Stadt, dann deutschlandweit
+    (``""``). Ohne Stadt gibt es nur die deutschlandweite Stufe. Auf ``max_stufen``
+    gekürzt."""
+    stadt = (stadt or "").strip()
+    plan = [stadt]
+    if stadt:
+        plan.append("")          # "" = deutschlandweit
+    return plan[:max(1, int(max_stufen))]
+
+
+def _hat_kontakt(lead: dict) -> bool:
+    """Ein Lead ohne JEDE Kontaktmöglichkeit (weder E-Mail NOCH Telefon) ist für
+    Outreach wertlos. Modul-Helfer (war früher lokal in ``suchen_per_signal``)."""
+    email = (lead.get("email") or lead.get("contact_email") or "").strip()
+    phone = (lead.get("phone") or lead.get("phone_clean") or lead.get("contact_phone") or "").strip()
+    return bool(email or phone)
+
+
 def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
                   nur_premium: bool = False, icp_breit: bool = False) -> tuple[list[dict], dict]:
     """Wendet das Premium-Gate auf die angereicherten Leads an und bestimmt die
@@ -328,10 +371,6 @@ class EngineBridge:
         angeheftet — die website-basierte Intent-Bewertung der Engine würde
         es sonst überschreiben.
         """
-        import csv as _csv
-        import tempfile
-        from product.bridge import signal_discovery as _sd
-
         self._pruefen(auftrag, ErlaubteAktion.SUCHEN_AUFBEREITEN)
         auftrag.starten()
 
@@ -354,95 +393,7 @@ class EngineBridge:
             ziel = max(int(auftrag.lead_anzahl), 1)
         except (TypeError, ValueError):
             ziel = 10
-        # Über-Suchen (Premium-Gate, Schritt 4): roh ein Vielfaches der Zielmenge
-        # holen, damit nach dem harten Gate genug echte Top-Leads übrig bleiben.
-        roh_ziel = _uebersuch_roh_ziel(ziel)
-        disc_queries = min(max(roh_ziel + 4, 10), 30)
-
-        such_diag: dict = {}
-        try:
-            firmen = _sd.discover_multi_signal(
-                self.engine_dir,
-                industry=auftrag.zielgruppe,
-                city=auftrag.region,
-                signal_types=signal_typen,
-                max_companies=roh_ziel,
-                cached_report=cached_report,
-                laender=laender,
-                max_queries=disc_queries,
-                max_results_per_query=5,
-                linkedin_web=linkedin_web,
-                linkedin_pro=linkedin_pro,
-                diagnostik=such_diag,
-            )
-        except Exception as exc:  # noqa: BLE001
-            kurz = f"Signal-Discovery fehlgeschlagen: {exc}"
-            auftrag.fehler_setzen(kurz)
-            return EngineBrueckenErgebnis(ok=False, meldung=kurz)
-
-        mit_website = [f for f in firmen if f.website]
-        if not mit_website:
-            kurz = "Keine Firmen mit Signal + auflösbarer Website gefunden."
-            auftrag.fehler_setzen(kurz)
-            return EngineBrueckenErgebnis(
-                ok=False, meldung=kurz,
-                rohdaten={"discovery": [f.als_dict() for f in firmen]},
-            )
-
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False, encoding="utf-8-sig", newline="",
-        )
-        tmp_path = tmp.name
-        tmp.close()
-        try:
-            _sd.build_enrich_csv(
-                mit_website, tmp_path,
-                industry=auftrag.zielgruppe, city=auftrag.region,
-            )
-            # Breite Signale (z.B. sales_hiring) finden viele Firmen → viele
-            # Websites zum Scrapen. 10 Min reichten dafür nicht (Abbruch mitten
-            # im Lauf, alles verworfen). 20 Min Puffer, damit breite Suchen
-            # sauber durchlaufen statt zu sterben.
-            rc, ausgabe = self._run(
-                ["--input-csv", tmp_path, "--mode", "enrich"],
-                timeout=1200,
-            )
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-        if rc != 0:
-            kurz = (ausgabe[-500:] if ausgabe else "enrich fehlgeschlagen")
-            auftrag.fehler_setzen(kurz)
-            return EngineBrueckenErgebnis(ok=False, meldung=kurz)
-
-        leads = self._enrich_leads_lesen(ausgabe)
-        self._signal_an_leads_heften(leads, mit_website, signal_typen[0])
-        # Kontakt-Anreicherung (Weg-2-Tiefe): Telefon aus bereits gescraptem Text
-        # + persönlicher Mail-Vorschlag. Defensiv, kein Auto-Send, kein Live-Lookup.
-        self._signal_kontakt_anreichern(leads)
-        self._signal_linkedin_anreichern(leads)
-        # Kontakt-Pflicht (Emilio): Ein Lead ohne JEDE Kontaktmöglichkeit (weder
-        # E-Mail NOCH Telefon) ist für Outreach wertlos → vor Personalisierung und
-        # Schreiben aussortieren, damit er gar nicht erst auftaucht.
-        def _hat_kontakt(l: dict) -> bool:
-            email = (l.get("email") or l.get("contact_email") or "").strip()
-            phone = (l.get("phone") or l.get("phone_clean") or l.get("contact_phone") or "").strip()
-            return bool(email or phone)
-        _vorher = len(leads)
-        leads = [l for l in leads if _hat_kontakt(l)]
-        if len(leads) < _vorher:
-            print(f"[signal] {_vorher - len(leads)} Leads ohne E-Mail/Telefon verworfen "
-                  f"({len(leads)} mit Kontakt bleiben).", flush=True)
-        # Kaufbereitschafts-Analyse (1k-Produkt): je Lead Score + Stufe + Gründe +
-        # Beleg aus den vorhandenen Feldern verdichten (deterministisch, kein Netz).
-        self._signal_readiness_bewerten(leads)
-        # PREMIUM-GATE (Schritt 4): die harte Qualitäts-Schranke VOR der Ausgabe.
-        # „sauber" = besteht das Gate (ersetzt die alte Schwelle contact_quality≥40).
-        # REJECT fliegt raus, PREMIUM zuerst, geliefert wird die Zielmenge der besten —
-        # so wird vor der teuren Personalisierung schon hart gefiltert.
+        # Engine-Urteile/ICP-Schalter EINMAL bestimmen (gelten für alle Stufen).
         _nur_premium = str(os.environ.get("SIGNAL_NUR_PREMIUM", "") or "").strip().lower() \
             in ("1", "true", "yes", "ja")
         # ICP-Fit-Falle (Regel 7): der ICP ist bewusst breit (gewerblicher
@@ -453,14 +404,70 @@ class EngineBridge:
         # Discovery-Schutznetz (ATS/Groß-Marke/Recruiter) sowieso.
         from product.bridge import angebot_signale as _as
         _icp_breit = bool(branche_egal) or _as.ist_versicherungs_signalset(signal_typen)
-        _vor_gate = len(leads)
-        leads, gate_zaehlung = _gate_ausgabe(
-            leads, ziel=ziel, zielbranche=auftrag.zielgruppe,
-            nur_premium=_nur_premium, icp_breit=_icp_breit)
+
+        # ── Gestufte Eskalation (Teil 2) ────────────────────────────────────
+        # Erst die gewählte Stadt; reichen die echten PREMIUM nicht, automatisch
+        # deutschlandweit nachsuchen und neu durchs Gate. HARTE OBERGRENZE: max.
+        # Stufen (Default 2) + Über-Such-Cap je Stufe → eine Suche kann nie
+        # ausufern. Jede Stufe ist ein eigener Enrich-Lauf (Zeit/SERPER); der Loop
+        # bricht ab, sobald genug A-Leads da sind. Alles per Env steuerbar
+        # (SIGNAL_MAX_STUFEN, SIGNAL_ZIEL_PREMIUM, SIGNAL_UEBERSUCH_*).
+        ziel_premium = _signal_ziel_premium(ziel)
+        plan = _stufen_plan(auftrag.region, _signal_max_stufen())
+        roh_cap = _uebersuch_roh_ziel(ziel)
+
+        such_diag: dict = {}
+        alle_leads: list[dict] = []
+        alle_firmen: list = []
+        seen_hosts: set[str] = set()
+        leads: list[dict] = []
+        gate_zaehlung: dict = {}
+        try:
+            for idx, ort in enumerate(plan):
+                # Jede weitere Stufe sucht breiter (mehr Roh-Treffer), gedeckelt.
+                roh_ziel = min(roh_cap * (idx + 1),
+                               int(os.environ.get("SIGNAL_UEBERSUCH_MAX", "80") or 80))
+                neue_leads, neue_firmen = self._signal_stufe(
+                    auftrag, signal_typen, ort=ort, roh_ziel=roh_ziel,
+                    cached_report=(cached_report if idx == 0 else None),
+                    laender=laender, linkedin_web=linkedin_web,
+                    linkedin_pro=linkedin_pro, seen_hosts=seen_hosts,
+                    such_diag=such_diag,
+                )
+                alle_firmen.extend(neue_firmen)
+                alle_leads.extend(neue_leads)
+                if not alle_leads:
+                    continue
+                # PREMIUM-GATE über die bisher gesammelten Leads: REJECT raus,
+                # PREMIUM zuerst, Zielmenge der besten.
+                leads, gate_zaehlung = _gate_ausgabe(
+                    alle_leads, ziel=ziel, zielbranche=auftrag.zielgruppe,
+                    nur_premium=_nur_premium, icp_breit=_icp_breit)
+                premium_da = gate_zaehlung.get("PREMIUM", 0)
+                print(
+                    f"[signal] Stufe {idx + 1}/{len(plan)} (Ort={ort or 'DE-weit'}): "
+                    f"PREMIUM={premium_da} REVIEW={gate_zaehlung.get('REVIEW', 0)} "
+                    f"REJECT={gate_zaehlung.get('REJECT', 0)} "
+                    f"(Ziel {ziel_premium} PREMIUM).", flush=True)
+                if premium_da >= ziel_premium:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            kurz = f"Signal-Discovery fehlgeschlagen: {exc}"
+            auftrag.fehler_setzen(kurz)
+            return EngineBrueckenErgebnis(ok=False, meldung=kurz)
+
+        firmen = alle_firmen
+        if not alle_leads:
+            kurz = "Keine Firmen mit Signal + auflösbarer Website + Kontakt gefunden."
+            auftrag.fehler_setzen(kurz)
+            return EngineBrueckenErgebnis(
+                ok=False, meldung=kurz,
+                rohdaten={"discovery": [f.als_dict() for f in firmen]},
+            )
         print(
-            f"[signal] Premium-Gate: PREMIUM={gate_zaehlung.get('PREMIUM', 0)} "
+            f"[signal] Premium-Gate (final): PREMIUM={gate_zaehlung.get('PREMIUM', 0)} "
             f"REVIEW={gate_zaehlung.get('REVIEW', 0)} REJECT={gate_zaehlung.get('REJECT', 0)} "
-            f"→ {len(leads)} ausgegeben (von {_vor_gate}).", flush=True)
+            f"→ {len(leads)} ausgegeben (von {len(alle_leads)}).", flush=True)
         # Verkaufspsychologische Personalisierung — NUR hier (Signal-Suche):
         # je Lead einen Aufhänger ans Lead-Feld heften + Vorschau-Mail rendern.
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
@@ -507,6 +514,86 @@ class EngineBridge:
                 "such_report": such_report,
             },
         )
+
+    def _signal_stufe(self, auftrag, signal_typen, *, ort, roh_ziel,
+                      cached_report, laender, linkedin_web, linkedin_pro,
+                      seen_hosts, such_diag):
+        """EIN Such-Durchgang der Eskalation für einen Ort (``""`` = deutschlandweit).
+
+        Discovery → nur NEUE Firmen (Host noch nicht in ``seen_hosts``) → Enrich →
+        Signal/Kontakt/LinkedIn anheften → Kontakt-Pflicht → Readiness. Gibt
+        ``(neue_leads, neue_firmen)`` zurück (bei keinem neuen Treffer ``([], [])``).
+        Defensiv: ein fehlgeschlagener Enrich-Lauf liefert ``([], neue_firmen)``, die
+        Eskalation kann mit der nächsten Stufe weitermachen. Dedup über den Host
+        verhindert Doppel-Enrichs/Doppel-Leads über die Stufen hinweg.
+        """
+        import tempfile
+        from product.bridge import signal_discovery as _sd
+
+        disc_queries = min(max(roh_ziel + 4, 10), 30)
+        firmen = _sd.discover_multi_signal(
+            self.engine_dir,
+            industry=auftrag.zielgruppe,
+            city=ort,
+            signal_types=signal_typen,
+            max_companies=roh_ziel,
+            cached_report=cached_report,
+            laender=laender,
+            max_queries=disc_queries,
+            max_results_per_query=5,
+            linkedin_web=linkedin_web,
+            linkedin_pro=linkedin_pro,
+            diagnostik=such_diag,
+        )
+        neu = []
+        for f in firmen:
+            if not f.website:
+                continue
+            h = self._host(f.website)
+            if not h or h in seen_hosts:
+                continue
+            seen_hosts.add(h)
+            neu.append(f)
+        if not neu:
+            return [], []
+
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8-sig", newline="",
+        )
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            _sd.build_enrich_csv(neu, tmp_path, industry=auftrag.zielgruppe, city=ort)
+            # Breite Signale finden viele Websites zum Scrapen → 20-Min-Puffer, damit
+            # breite Suchen sauber durchlaufen statt mitten im Lauf zu sterben.
+            rc, ausgabe = self._run(
+                ["--input-csv", tmp_path, "--mode", "enrich"], timeout=1200,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if rc != 0:
+            print(f"[signal] Enrich-Lauf (Ort={ort or 'DE-weit'}) fehlgeschlagen — "
+                  f"Stufe übersprungen.", flush=True)
+            return [], neu
+
+        leads = self._enrich_leads_lesen(ausgabe)
+        self._signal_an_leads_heften(leads, neu, signal_typen[0])
+        # Kontakt-Anreicherung (Weg-2-Tiefe): Telefon aus bereits gescraptem Text
+        # + persönlicher Mail-Vorschlag. Defensiv, kein Auto-Send, kein Live-Lookup.
+        self._signal_kontakt_anreichern(leads)
+        self._signal_linkedin_anreichern(leads)
+        # Kontakt-Pflicht: ein Lead ohne JEDE Kontaktmöglichkeit ist wertlos → raus.
+        _vorher = len(leads)
+        leads = [l for l in leads if _hat_kontakt(l)]
+        if len(leads) < _vorher:
+            print(f"[signal] {_vorher - len(leads)} Leads ohne E-Mail/Telefon verworfen "
+                  f"({len(leads)} mit Kontakt bleiben).", flush=True)
+        # Kaufbereitschafts-Analyse (deterministisch, kein Netz).
+        self._signal_readiness_bewerten(leads)
+        return leads, neu
 
     def _enrich_leads_lesen(self, enrich_ausgabe: str) -> list[dict]:
         """Liest leads.json des enrich-Laufs (Pfad aus '[enrich] output -> ...')."""

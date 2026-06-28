@@ -94,6 +94,18 @@ _MULL_RECHT_RE = re.compile(r"[§©®™]|gmbh\s*&|e\.?\s*v\.?\b", re.I)
 # Platzhalter-Fragmente, die der Scraper als „Name" abgreift („… Inc", „Firmenname B2B").
 _MULL_NAME_HART_TOKENS = frozenset({"inc", "b2b", "firmenname", "musterfirma"})
 
+# Funktions-/Abteilungs-/Scrape-Artefakt-Wörter: kein echter Ansprechpartner,
+# sondern eine Stelle/Region/Überschrift, die der Scraper als „Name" abgreift
+# (z. B. „Regionaldirektion Bayern", „Angaben May und Olde", „Zentrale"). Diese
+# Wörter kommen in einem echten Personennamen nie vor → konservativ.
+_MULL_NAME_FUNKTION = frozenset({
+    "regionaldirektion", "direktion", "niederlassung", "filiale", "geschaeftsstelle",
+    "geschäftsstelle", "vertretung", "zentrale", "abteilung", "sekretariat",
+    "empfang", "buchhaltung", "personalabteilung", "kundenservice", "kundendienst",
+    "service", "support", "vertrieb", "verwaltung", "team", "angaben", "impressum",
+    "kontakt", "ansprechpartner", "geschaeftsfuehrung", "geschäftsführung",
+})
+
 # Akademische Titel-/Grad-Fragmente. Stehen sie OHNE echten Vor-+Nachnamen dahinter
 # (z. B. „Parmentier Dipl"), ist der „Name" nur ein Titelrest = Artefakt.
 _NAME_TITEL = frozenset({"dipl", "ing", "dr", "prof", "mba", "msc", "bsc", "llm", "phd", "med"})
@@ -149,6 +161,8 @@ def _ist_mull_name(name: str) -> bool:
     if wortmenge & _MULL_NAME_TOKENS:
         return True
     if wortmenge & _MULL_NAME_HART_TOKENS:        # „… Inc" / „Firmenname B2B"
+        return True
+    if wortmenge & _MULL_NAME_FUNKTION:           # „Regionaldirektion Bayern" / „Angaben …"
         return True
     # Titelrest ohne echten Namen (z. B. „Parmentier Dipl"): bleiben nach Abzug der
     # akademischen Titel < 2 echte Namens-Token, ist es ein Artefakt — ein echter
