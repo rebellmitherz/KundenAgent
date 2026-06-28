@@ -139,6 +139,16 @@ class AgentRunner:
         )
 
         def _arbeit() -> None:
+            # Konsolen-Encoding härten: auf Windows ist stdout/stderr oft cp1252 →
+            # ein Sonderzeichen (z. B. „→") in einer Log-Zeile würde sonst den
+            # ganzen Such-Thread mit „'charmap' codec can't encode" abbrechen.
+            # errors="replace" macht jeden print ungefährlich (defensiv, kein Crash).
+            import sys as _sys
+            for _stream in (_sys.stdout, _sys.stderr):
+                try:
+                    _stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
             try:
                 res = self._bridge.suchen_per_signal(
                     auftrag, signal_typ=signal_typ, laender=laender,

@@ -467,7 +467,7 @@ class EngineBridge:
         print(
             f"[signal] Premium-Gate (final): PREMIUM={gate_zaehlung.get('PREMIUM', 0)} "
             f"REVIEW={gate_zaehlung.get('REVIEW', 0)} REJECT={gate_zaehlung.get('REJECT', 0)} "
-            f"→ {len(leads)} ausgegeben (von {len(alle_leads)}).", flush=True)
+            f"-> {len(leads)} ausgegeben (von {len(alle_leads)}).", flush=True)
         # Verkaufspsychologische Personalisierung — NUR hier (Signal-Suche):
         # je Lead einen Aufhänger ans Lead-Feld heften + Vorschau-Mail rendern.
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
