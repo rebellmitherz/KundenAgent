@@ -123,7 +123,7 @@ def _gate_ausgabe(leads: list[dict], *, ziel: int, zielbranche: str,
     zaehlung = _pg.anreichern(leads, zielbranche=zielbranche, icp_breit=icp_breit)
     rang = {_pg.PREMIUM: 3, _pg.REVIEW: 2, _pg.REJECT: 1}
 
-    behalten = [l for l in leads if l.get("premium_klasse") != _pg.REJECT]
+    behalten = [l for l in leads if l.get("premium_klasse") not in (_pg.REJECT, _pg.REVIEW)]
     if nur_premium:
         behalten = [l for l in behalten if l.get("premium_klasse") == _pg.PREMIUM]
 
