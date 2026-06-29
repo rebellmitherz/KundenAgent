@@ -279,9 +279,14 @@ def einwaende_fuer_lead(lead: dict, *, angebot: str = "", anzahl: int = 5) -> li
     # je Lead sichtbar individuell sein — auch wenn mehrere Leads dasselbe Signal
     # tragen.
     if plan:
-        start = (sum(ord(c) for c in firma) % len(plan)) if firma else 0
-        rotated = plan[start:] + plan[:start]
-        chosen = rotated[: max(int(anzahl), 1)]
+        # Top-Einwand (wahrscheinlichster, signal-spezifisch) bleibt FIX an Position 0;
+        # nur die „Weiteren" rotieren pro Firma → kein Template-Spam, aber die
+        # Gesprächsführung startet immer beim stärksten Einwand des Signals.
+        top, pool = plan[0], plan[1:]
+        if pool:
+            start = (sum(ord(c) for c in firma) % len(pool)) if firma else 0
+            pool = pool[start:] + pool[:start]
+        chosen = ([top] + pool)[: max(int(anzahl), 1)]
     else:
         chosen = _FALLBACK_PLAN[: max(int(anzahl), 1)]
     ctx = _einwand_ctx(lead, angebot)
