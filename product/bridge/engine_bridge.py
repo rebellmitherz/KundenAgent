@@ -568,6 +568,7 @@ class EngineBridge:
             # breite Suchen sauber durchlaufen statt mitten im Lauf zu sterben.
             rc, ausgabe = self._run(
                 ["--input-csv", tmp_path, "--mode", "enrich"], timeout=1200,
+                extra_env={"LINKEDIN_SERP_RESOLVE": "0"},
             )
         finally:
             try:

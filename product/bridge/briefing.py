@@ -32,6 +32,12 @@ _ANLASS: dict[str, tuple[str, str]] = {
     "marketing_hiring":   ("Sie gerade in Marketing und Leadgewinnung investieren", "Ihre Marketing-Investition"),
     "leadership_hiring":  ("Sie gerade eine neue Vertriebs- oder Marketingleitung holen", "Ihre neue Führungsrolle"),
     "new_location":       ("Sie gerade einen neuen Standort aufbauen", "Ihr neuer Standort"),
+    "vs_hiring":          ("Sie gerade Mitarbeiter einstellen oder Teams ausbauen", "Ihr Personalwachstum"),
+    "vs_benefits":        ("Sie mit Benefits wie bAV, bKV oder Jobrad werben", "Ihre Mitarbeiterbenefits"),
+    "vs_fuhrpark":        ("bei Ihnen Fahrer, Fahrzeuge oder Außendienst sichtbar sind", "Ihr Fuhrpark-/Außendienst-Risiko"),
+    "vs_standort":        ("Sie Standorte, Flächen oder Niederlassungen aufbauen", "Ihre Standort-/Expansionsphase"),
+    "vs_produktion":      ("Produktion, Maschinen oder Lager bei Ihnen eine Rolle spielen", "Ihr Produktions-/Maschinenrisiko"),
+    "vs_cyber":           ("IT, Daten oder Informationssicherheit sichtbar wichtig sind", "Ihr Cyber-/IT-Risiko"),
 }
 
 # Einwand-Katalog nach Kategorie. antwort/ziel/naechster_schritt dürfen die Platzhalter
@@ -97,6 +103,36 @@ _EINWAND_KATALOG: dict[str, dict] = {
         "ziel": "Vom Kalt-Klischee abgrenzen.",
         "naechster_schritt": "Darf ich Ihnen das eine konkrete Signal nennen, das mich auf Sie gebracht hat?",
     },
+    "versicherung_bestehend": {
+        "frage": "Wir haben schon einen Versicherungsmakler.",
+        "antwort": "Das ist gut — dann geht es nicht um Wechsel. Es geht um einen zweiten Blick auf {anlass_noun}: ob Haftung, Ausfall, Cyber, Sachwerte und Mitarbeiter-Themen noch sauber zusammenpassen.",
+        "ziel": "Nicht Makler ersetzen, sondern Lückenprüfung positionieren.",
+        "naechster_schritt": "Darf ich Ihnen kurz sagen, wo bei {branche_phrase} typischerweise Lücken entstehen?",
+    },
+    "versicherung_kein_schaden": {
+        "frage": "Wir hatten bisher keine Probleme.",
+        "antwort": "Genau dann ist der beste Zeitpunkt zum Prüfen. Wenn {anlass_satz}, verändern sich Werte, Haftungen oder Ausfallrisiken oft schneller als die alten Policen.",
+        "ziel": "Prävention statt Schadensfall verkaufen.",
+        "naechster_schritt": "Wollen wir in 15 Minuten nur die größten 2–3 Risikopunkte abgleichen?",
+    },
+    "versicherung_preis": {
+        "frage": "Versicherung ist bei uns vor allem eine Preisfrage.",
+        "antwort": "Verständlich. Aber billiger bringt nichts, wenn genau der teure Schaden nicht sauber gedeckt ist. Wir prüfen zuerst Deckung und Risiko — erst danach Preis.",
+        "ziel": "Vom Beitrag auf Schadenhöhe und Deckungslücke drehen.",
+        "naechster_schritt": "Darf ich mit einer kurzen Lückenfrage starten statt mit einem Angebot?",
+    },
+    "versicherung_komplex": {
+        "frage": "Das ist bei uns zu komplex für ein kurzes Gespräch.",
+        "antwort": "Gerade deshalb kein langer Pitch. Wir nehmen nur den sichtbaren Anlass — {anlass_noun} — und prüfen, ob daraus ein konkreter Versicherungs-Check Sinn macht.",
+        "ziel": "Komplexität reduzieren auf einen Anlass.",
+        "naechster_schritt": "Welche eine Stelle wäre bei Ihnen am teuersten, wenn sie morgen ausfällt?",
+    },
+    "versicherung_zustaendig": {
+        "frage": "Dafür bin ich nicht zuständig.",
+        "antwort": "Danke. Wer ist bei {firma} für Versicherung, Risiko, Fuhrpark, Personalbenefits oder kaufmännische Themen zuständig? Dann gehe ich sauber den richtigen Weg.",
+        "ziel": "Zum echten Entscheiderweg kommen.",
+        "naechster_schritt": "Dürfen Sie mir die passende Person oder Abteilung nennen?",
+    },
 }
 
 # Pro Signal: [wahrscheinlichster Einwand (Top), … Pool für „Weitere"]. Aus dem Pool
@@ -108,6 +144,12 @@ _SIGNAL_EINWAND_PLAN: dict[str, list[str]] = {
     "marketing_hiring":   ["bestehender_dienstleister", "zustaendigkeit", "vertrauen_qualitaet", "kein_bedarf", "keine_zeit", "unterlagen"],
     "leadership_hiring":  ["zustaendigkeit", "keine_zeit", "interner_aufbau", "kein_bedarf", "unterlagen", "skepsis_kalt"],
     "new_location":       ["kein_bedarf", "keine_zeit", "budget", "vertrauen_qualitaet", "skepsis_kalt", "unterlagen"],
+    "vs_hiring":          ["versicherung_bestehend", "versicherung_kein_schaden", "versicherung_preis", "versicherung_zustaendig", "unterlagen", "keine_zeit"],
+    "vs_benefits":        ["versicherung_preis", "versicherung_bestehend", "versicherung_zustaendig", "kein_bedarf", "unterlagen", "keine_zeit"],
+    "vs_fuhrpark":        ["versicherung_bestehend", "versicherung_kein_schaden", "versicherung_komplex", "versicherung_preis", "versicherung_zustaendig", "unterlagen"],
+    "vs_standort":        ["versicherung_komplex", "versicherung_bestehend", "versicherung_kein_schaden", "versicherung_preis", "unterlagen", "keine_zeit"],
+    "vs_produktion":      ["versicherung_komplex", "versicherung_bestehend", "versicherung_kein_schaden", "versicherung_preis", "versicherung_zustaendig", "unterlagen"],
+    "vs_cyber":           ["versicherung_bestehend", "versicherung_komplex", "versicherung_kein_schaden", "versicherung_preis", "versicherung_zustaendig", "unterlagen"],
 }
 _FALLBACK_PLAN = ["kein_bedarf", "interner_aufbau", "budget", "keine_zeit", "skepsis_kalt", "vertrauen_qualitaet"]
 
@@ -120,6 +162,12 @@ _SIGNAL_WARUM: dict[str, str] = {
     "marketing_hiring": "investiert in Marketing — Neukundengewinnung hat Priorität",
     "leadership_hiring": "holt Vertriebs- oder Marketingleitung — strategische Neuausrichtung",
     "new_location": "eröffnet einen neuen Standort — Expansionsphase mit frischem Kundenbedarf",
+    "vs_hiring": "stellt Mitarbeiter ein — Personalwachstum verändert Haftungs-, Vorsorge- und Absicherungsbedarf",
+    "vs_benefits": "wirbt mit Benefits — bAV/bKV und Mitarbeiterbindung sind ein aktueller Versicherungsanlass",
+    "vs_fuhrpark": "zeigt Fuhrpark-, Fahrer- oder Außendienstbedarf — Flotte, Haftung und Ausfallrisiken sind konkret",
+    "vs_standort": "expandiert räumlich — neue Standorte verändern Sachwerte, Haftung und Betriebsunterbrechungsrisiken",
+    "vs_produktion": "zeigt Produktion, Maschinen oder Lager — Sachwerte, Maschinenbruch und Ausfallrisiko sind konkret",
+    "vs_cyber": "zeigt IT-/Cyber-Risiko — Daten, Systeme und Betriebsunterbrechung müssen sauber abgesichert sein",
 }
 
 # ─── Firmen-Kurzprofil ────────────────────────────────────────────────────────
@@ -225,13 +273,17 @@ def einwaende_fuer_lead(lead: dict, *, angebot: str = "", anzahl: int = 5) -> li
     """
     signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
     plan = _SIGNAL_EINWAND_PLAN.get(signal, _FALLBACK_PLAN)
-    top, pool = plan[0], list(plan[1:])
-    # Pro Firma rotieren, damit die „Weiteren" variieren (Top bleibt = wahrscheinlichster).
     firma = (lead.get("company_name") or "").strip()
-    if pool:
-        start = (sum(ord(c) for c in firma) % len(pool)) if firma else 0
-        pool = pool[start:] + pool[:start]
-    chosen = [top] + pool[: max(int(anzahl) - 1, 0)]
+    # Pro Firma rotieren, damit Top-Einwand und weitere Einwände nicht wie
+    # Template-Spam wirken. Bei Premium-Auslieferungen muss die Gesprächsführung
+    # je Lead sichtbar individuell sein — auch wenn mehrere Leads dasselbe Signal
+    # tragen.
+    if plan:
+        start = (sum(ord(c) for c in firma) % len(plan)) if firma else 0
+        rotated = plan[start:] + plan[:start]
+        chosen = rotated[: max(int(anzahl), 1)]
+    else:
+        chosen = _FALLBACK_PLAN[: max(int(anzahl), 1)]
     ctx = _einwand_ctx(lead, angebot)
     return [_fmt_einwand(k, ctx) for k in chosen]
 
