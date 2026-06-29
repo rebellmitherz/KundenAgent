@@ -1445,7 +1445,11 @@ function renderLeads(leads) {
 
   grid.innerHTML = sortiereLeads(leads).map(l => {
     const s = l.score || 0;
-    const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+    const k = l.premium_klasse || '';
+    const scoreClass = k === 'PREMIUM' ? 'score-high'
+                     : k === 'REVIEW'  ? 'score-mid'
+                     : k === 'REJECT'  ? 'score-low'
+                     : (s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low'));
     const scoreLabel = s > 0 ? s : '—';
     const gruende = (l.gruende || []).map(g => `<div class="lead-detail">
         <span class="lead-icon">✓</span>
@@ -2338,7 +2342,11 @@ function _premiumBadge(l) {
 
 function _signalLeadCard(l) {
   const s = l.score || 0;
-  const scoreClass = s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low');
+  const k = l.premium_klasse || '';
+  const scoreClass = k === 'PREMIUM' ? 'score-high'
+                   : k === 'REVIEW'  ? 'score-mid'
+                   : k === 'REJECT'  ? 'score-low'
+                   : (s >= 70 ? 'score-high' : (s >= 40 ? 'score-mid' : 'score-low'));
   const did = _domId(l.lead_id);
   const gruende = (l.gruende || []).map(g => `<div class="lead-detail">
       <span class="lead-icon">✓</span>
