@@ -88,6 +88,11 @@ def test_persoenliche_vs_sammelmail():
     # sonst konservativ (lieber kein Etikett als ein falsches).
     assert r.ist_persoenliche_mail("anna.b@firma.de") is False
     assert r.ist_persoenliche_mail("anna.b@firma.de", "Anna Bauer") is True
+    # vorname.nachname@, aber bekannter Ansprechpartner ist eine ANDERE Person
+    # → gehört nicht unserem Kontakt → NICHT als persönlicher Kanal werten.
+    assert r.ist_persoenliche_mail("andy.freund@firma.de", "Michael Petri") is False
+    # Passt der Name dagegen, bleibt es persönlich.
+    assert r.ist_persoenliche_mail("andy.freund@firma.de", "Andy Freund") is True
     # Bloßer Vorname / Kürzel ohne Namensbeleg → nicht persönlich.
     assert r.ist_persoenliche_mail("markus@firma.de") is False
     assert r.ist_persoenliche_mail("t.online@firma.de") is False

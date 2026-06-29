@@ -135,7 +135,15 @@ def ist_persoenliche_mail(email: str, contact_name: str = "") -> bool:
     if nt and any(t in toks for t in nt):
         return True
     alpha = [t for t in toks if t.isalpha() and len(t) >= 2]
-    return len(alpha) >= 2
+    if len(alpha) < 2:
+        return False
+    # vorname.nachname-Muster nur als „persönlich" werten, wenn KEIN
+    # Ansprechpartner bekannt ist. Ist ein Name bekannt, hätte er oben
+    # matchen müssen — sonst gehört die Adresse einer anderen Person und
+    # ist NICHT der persönliche Kanal zu unserem Kontakt.
+    if nt:
+        return False
+    return True
 
 
 # Rückwärtskompatibler Alias (alter Name).
