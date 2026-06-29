@@ -218,6 +218,15 @@ def _stufe_deckeln(stufe: str, obergrenze: Optional[str]) -> str:
     return stufe
 
 
+def _kombi_deckel(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    """Strengere (niedrigere) Stufen-Obergrenze gewinnt; None = keine."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if _STUFE_RANG.get(a, 2) <= _STUFE_RANG.get(b, 2) else b
+
+
 def _engine_deckelung(lead: dict, score: int, *, phone: bool, pers_mail: bool):
     """Härtet den Score am Engine-Urteil (Schritt 2 Premium-Gate).
 
@@ -289,6 +298,18 @@ def bewerten(lead: dict) -> dict:
     # do_not_contact und reine Rollen-Mail ohne Telefon dürfen nie „hoch" tragen.
     score, obergrenze, engine_gruende = _engine_deckelung(
         lead, score, phone=phone, pers_mail=pers_mail)
+
+    # F4: Ein EINZELNES Kaufsignal trägt nur "hoch", wenn ein persönlicher
+    # Direktkontakt vorliegt (persönliche Mail oder Mobilnummer). Ein Signal an
+    # eine reine Sammel-/Zentral-Adresse ist ein Hinweis, keine Hochpriorität.
+    # Veraltete Einzelsignale fallen ohnehin schon über den multiplikativen
+    # Frische-Faktor unter die "hoch"-Schwelle. Mehrere gleichzeitige Signale
+    # (extra>=1) bleiben unberührt. Reiner Deckel — senkt nie unter "mittel".
+    if extra == 0:
+        direkt = pers_mail or ist_mobilnummer(
+            lead.get("phone") or lead.get("phone_clean") or lead.get("contact_phone") or "")
+        if not direkt:
+            obergrenze = _kombi_deckel(obergrenze, MITTEL)
 
     if score >= 70:
         stufe = HOCH

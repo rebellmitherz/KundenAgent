@@ -23,13 +23,47 @@ def _lead(**kw) -> dict:
 
 
 def test_heisses_signal_voller_kontakt_ist_hoch():
+    # Einzelsignal trägt "hoch" nur mit frischem Direktkontakt (F4): frisches
+    # Signal (≤14 Tage) + Mobilnummer (Direktkontakt) → "hoch" gerechtfertigt.
     l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
-              contact_quality_score=70, email="anna.b@firma.de", phone="+4951199")
+              contact_quality_score=70, email="anna.b@firma.de",
+              phone="+4915112345", signal_alter_tage=3)
     res = r.bewerten(l)
     assert res["score"] >= 70 and res["stufe"] == r.HOCH, res
     # Kaufsignal-Grund steht an erster Stelle, Beleg vorhanden.
     assert res["gruende"][0].startswith("Kaufsignal:")
     assert res["beleg_url"] == "https://stepstone.de/job/123"
+
+
+def test_einzelsignal_ohne_direktkontakt_max_mittel():
+    # F4: ein einzelnes heißes Signal mit hohem Roh-Score, aber OHNE persönlichen
+    # Direktkontakt (info@ + Festnetz) → nur "mittel" (Hinweis, keine Hochpriorität).
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=80, email="info@firma.de",
+              phone="+4951112345", signal_alter_tage=3)
+    res = r.bewerten(l)
+    assert res["score"] >= 70, res          # Roh-Score wäre "hoch"
+    assert res["stufe"] == r.MITTEL, res    # Stufe gedeckelt mangels Direktkontakt
+
+
+def test_einzelsignal_veraltet_nicht_hoch_ueber_frischefaktor():
+    # Veraltetes Einzelsignal (>90 Tage) → Frische-Faktor 0.5 drückt den Score
+    # unter die "hoch"-Schwelle, selbst mit perfektem Direktkontakt.
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=90, email="anna.bauer@firma.de",
+              contact_full_name="Anna Bauer", phone="+4915112345",
+              signal_alter_tage=120)
+    res = r.bewerten(l)
+    assert res["stufe"] != r.HOCH, res
+
+
+def test_mehrfachsignal_bleibt_hoch_ohne_einzeldeckel():
+    # Mehrere gleichzeitige Signale (Stapelung) sind vom Einzeldeckel ausgenommen.
+    l = _lead(entdeckt_per_signal="appointment_setter", signal_fit_score=0.9,
+              contact_quality_score=80, email="info@firma.de", phone="+4951112345",
+              signale=["appointment_setter", "sales_hiring"])
+    res = r.bewerten(l)
+    assert res["stufe"] == r.HOCH, res
 
 
 def test_schwaches_signal_nur_sammelmail_ist_niedrig():

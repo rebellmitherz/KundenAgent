@@ -87,19 +87,18 @@ def test_gate_ausgabe_cap_haelt_alle_premium():
     assert len(aus) == 5
 
 
-def test_gate_ausgabe_liefert_zielmenge_der_besten():
-    # 1 Premium + 4 Review, ziel=3 → Premium + 2 beste Review (nach Score) = 3.
+def test_gate_ausgabe_review_fuellt_zielmenge_nicht_mehr():
+    # F3: REVIEW wird NICHT mehr zur Auffüllung der Zielmenge geliefert. 1 Premium +
+    # 4 Review, ziel=3 → nur das eine PREMIUM kommt durch (lieber weniger, aber sauber).
     leads = [_premium()] + [
         _premium(ready_to_send="no", company_name=f"Review {i} GmbH",
                  kaufbereitschaft_score=50 - i)
         for i in range(4)
     ]
-    aus, _ = eb._gate_ausgabe(leads, ziel=3, zielbranche="Maschinenbau")
-    assert len(aus) == 3
+    aus, z = eb._gate_ausgabe(leads, ziel=3, zielbranche="Maschinenbau")
+    assert len(aus) == 1
     assert aus[0]["premium_klasse"] == pg.PREMIUM
-    # die zwei besten Review (Score 50, 49) vor den schwächeren (48, 47).
-    assert aus[1]["kaufbereitschaft_score"] == 50
-    assert aus[2]["kaufbereitschaft_score"] == 49
+    assert z[pg.REVIEW] == 4 and all(l["premium_klasse"] != pg.REVIEW for l in aus)
 
 
 def test_gate_ausgabe_taggt_jeden_lead():
@@ -112,10 +111,12 @@ def test_gate_ausgabe_taggt_jeden_lead():
 # ── „Branche egal" / breiter ICP (Regel 7 greift nicht, Boden bleibt) ────────
 def test_gate_ausgabe_ohne_breit_leere_zielbranche_nur_review():
     # Normalfall: ohne Zielbranche → Regel 7 „unbestimmt" → höchstens REVIEW.
+    # F3: REVIEW wird klassifiziert, aber NICHT ausgeliefert → Ausgabe leer.
     leads = [_premium()]
     aus, z = eb._gate_ausgabe(leads, ziel=10, zielbranche="")
     assert z[pg.PREMIUM] == 0 and z[pg.REVIEW] == 1
-    assert aus[0]["premium_klasse"] == pg.REVIEW
+    assert len(aus) == 0
+    assert leads[0]["premium_klasse"] == pg.REVIEW
 
 
 def test_gate_ausgabe_branche_egal_macht_premium():
