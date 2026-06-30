@@ -485,8 +485,18 @@ class EngineBridge:
         # je Lead einen Aufhänger ans Lead-Feld heften + Vorschau-Mail rendern.
         # Defensiv: ein Fehler (z. B. fehlender OpenAI-Key) darf die Suche nie
         # kippen — ohne Key/Signal bleibt es eine saubere generische Mail.
-        self._signal_leads_personalisieren(leads)
+        self._signal_leads_personalisieren(leads, signal_typen=signal_typen)
         self._signal_briefing_erstellen(leads, angebot=getattr(auftrag, "angebot", "") or "")
+        # Ehrlicher Personalisierungs-Report: macht sichtbar, ob der LLM wirklich
+        # feuert (Quota/Key/Fehler) und wie viele Leads einen echten Opener haben.
+        # Verhindert, dass ein stilles Zurückfallen auf Vorlagen unbemerkt bleibt.
+        llm_ok, llm_grund = self._llm_status()
+        opener_n = sum(1 for l in leads if (l.get("aufhaenger") or "").strip())
+        print(
+            f"[signal] Personalisierung: LLM "
+            f"{'AKTIV' if llm_ok else 'INAKTIV (' + llm_grund + ')'} - "
+            f"Opener {opener_n}/{len(leads)} - "
+            f"Einwaende-Quelle {'LLM' if llm_ok else 'Vorlage'}", flush=True)
 
         # Such-Coverage-Report (Transparenz fürs Operator-UI): durchsuchte Quellen,
         # Roh-Treffer je Signal (aus der Discovery) + finale Lead-Verteilung je Signal.
@@ -722,17 +732,78 @@ class EngineBridge:
         except Exception:
             return ""
 
-    def _signal_leads_personalisieren(self, leads: list[dict]) -> None:
+    def _engine_env_laden(self) -> None:
+        """Lädt ``b2bbot/.env`` in die Umgebung (idempotent, ohne Überschreiben).
+
+        Damit OPENAI_API_KEY & Co. in JEDEM Lauf-Pfad vorhanden sind — auch in
+        Operator-Skripten, die nur die Bridge importieren und die .env nicht
+        selbst laden. Ohne das blieb der LLM still aus → Vorlagen-Mails.
+        """
+        try:
+            from dotenv import load_dotenv  # type: ignore
+            load_dotenv(Path(self.engine_dir) / ".env")
+        except Exception:
+            pass
+
+    def _aufhaenger_angebot(self, signal_typen=None) -> str:
+        """Bestimmt den Angebot-Typ für die Aufhänger-Regeln ROBUST aus den
+        gesuchten Signalen — nicht aus globalem Profil-Status.
+
+        Der Profil-Status fehlt in Operator-Skripten (kein aktives Profil) und
+        führte dort dazu, dass die Angle-Regel ``None`` lieferte → ``aufhaenger=""``,
+        obwohl ein klares Signal vorlag. Die gesuchten Signale sind maßgeblich:
+        ``vs_*`` → Versicherung, sonst KundenAgent. Ein explizites Website-Profil
+        gewinnt (signalbasiert nicht ableitbar).
+        """
+        try:
+            from product.personalization import signal_outreach as _so
+            prof = _so.angebot_aus_profil_id(self._aktives_profil_id())
+        except Exception:
+            prof = ""
+        if prof == "website":
+            return "website"
+        typen = [str(t).lower() for t in (signal_typen or [])]
+        if typen:
+            return "versicherung" if any(t.startswith("vs_") for t in typen) else "kundenagent"
+        return prof or "kundenagent"
+
+    def _llm_status(self) -> tuple[bool, str]:
+        """Ehrlicher LLM-Selbsttest für den Lauf-Report.
+
+        Feuert der OpenAI-Pfad wirklich? Ein einzelner Probe-Call deckt fehlenden
+        Key, überschrittene Quota (429) und Netzfehler auf — damit ein stilles
+        Zurückfallen auf Vorlagen nie wieder unbemerkt bleibt.
+        """
+        self._engine_env_laden()
+        try:
+            from product.personalization.aufhaenger import standard_llm
+            llm = standard_llm()
+        except Exception as e:
+            return False, type(e).__name__
+        if llm is None:
+            return False, "kein OPENAI_API_KEY"
+        try:
+            out = (llm("Antworte nur mit: OK") or "").strip()
+        except Exception as e:
+            txt = str(e).lower()
+            grund = "Quota/Billing (429)" if ("quota" in txt or "429" in txt) else type(e).__name__
+            return False, grund
+        return (bool(out), "OK" if out else "leere Antwort")
+
+    def _signal_leads_personalisieren(self, leads: list[dict], signal_typen=None) -> None:
         """Heftet pro Signal-Lead einen Aufhänger an + rendert die Vorschau-Mail.
 
         Komplett defensiv: jede Ausnahme (fehlender OpenAI-Key, Engine-Import,
         Netzfehler) wird geschluckt — die Signal-Suche läuft immer weiter, im
         Zweifel mit leerem Aufhänger (= saubere generische Mail).
+
+        ``signal_typen`` steuert die Angle-Wahl robust (siehe ``_aufhaenger_angebot``).
         """
+        self._engine_env_laden()
         try:
             from product.personalization import signal_outreach as _so
             from product.personalization.aufhaenger import standard_llm as _std_llm
-            angebot = _so.angebot_aus_profil_id(self._aktives_profil_id())
+            angebot = self._aufhaenger_angebot(signal_typen)
             # Website-Angebot: echte Seite je Lead prüfen → Schwächen treiben den
             # Aufhänger. Defensiv: tote/langsame Seite überspringen, nie crashen.
             if angebot == "website":
@@ -760,6 +831,7 @@ class EngineBridge:
         gesetzt ist (kein Doppel-LLM-Call). ``angebot`` fließt in die lead-spezifischen
         Einwand-Antworten ein. Defensiv: ein Fehler kippt nie die gesamte Signal-Suche.
         """
+        self._engine_env_laden()
         try:
             from product.bridge import briefing as _br
             from product.personalization.aufhaenger import standard_llm as _std_llm

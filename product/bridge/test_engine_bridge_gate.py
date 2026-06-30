@@ -286,3 +286,33 @@ def test_echte_branche_laesst_icp_eng(monkeypatch):
     b.suchen_per_signal(
         _FakeAuftrag("Berlin", ziel=1, zielgruppe="Maschinenbau"), "sales_hiring")
     assert cap["icp_breit"] is False
+
+
+# ─── _aufhaenger_angebot: robuste Angle-Wahl aus dem Signal (Bugfix leerer Opener) ──
+
+def _bridge_mit_profil(profil_id=""):
+    b = object.__new__(eb.EngineBridge)
+    b._aktives_profil_id = lambda: profil_id
+    return b
+
+
+def test_aufhaenger_angebot_vertriebssignal_ist_kundenagent_trotz_stale_profil():
+    # Stale/falsches Profil (versicherung) darf den Vertriebs-Lauf NICHT auf eine
+    # Versicherungs-Angle ziehen → sonst aufhaenger="" (genau der gemeldete Bug).
+    b = _bridge_mit_profil("versicherung_xyz")
+    assert b._aufhaenger_angebot(["sales_hiring", "growth_expansion"]) == "kundenagent"
+
+
+def test_aufhaenger_angebot_vs_signale_ist_versicherung():
+    b = _bridge_mit_profil("")
+    assert b._aufhaenger_angebot(["vs_hiring", "vs_cyber"]) == "versicherung"
+
+
+def test_aufhaenger_angebot_website_profil_gewinnt():
+    b = _bridge_mit_profil("website_relaunch")
+    assert b._aufhaenger_angebot(["sales_hiring"]) == "website"
+
+
+def test_aufhaenger_angebot_ohne_signale_default_kundenagent():
+    b = _bridge_mit_profil("")
+    assert b._aufhaenger_angebot([]) == "kundenagent"

@@ -263,13 +263,45 @@ def _fmt_einwand(kategorie: str, ctx: dict) -> dict:
     }
 
 
-def einwaende_fuer_lead(lead: dict, *, angebot: str = "", anzahl: int = 5) -> list[dict]:
+def _verfeinere_einwand_antwort(einwand: dict, lead: dict, llm: LLM) -> dict:
+    """Formuliert die Einwand-Antwort per LLM individuell auf die Firma um.
+
+    Die deterministische Antwort bleibt Fallback: fehlender Key, Quota oder Fehler
+    → der Einwand kommt unverändert zurück. Nichts wird erfunden, nur umformuliert.
+    """
+    firma = (lead.get("company_name") or "die Firma").strip()
+    signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
+    anlass_noun = _ANLASS.get(signal, _ANLASS_DEFAULT)[1]
+    prompt = (
+        "Formuliere diese Antwort auf einen Einwand im B2B-Verkaufsgespräch natürlicher "
+        "und individuell auf die Firma. Deutsch, Sie-Form, höchstens 2 Sätze, kein Lob, "
+        "keine Floskel, nichts erfinden.\n"
+        f"Firma: {firma}\nAnlass: {anlass_noun}\nEinwand: {einwand['frage']}\n"
+        f"Bisherige Antwort: {einwand['antwort']}\nNur die neue Antwort, sonst nichts:"
+    )
+    try:
+        out = (llm(prompt) or "").strip().strip('"').strip()
+        if len(out) > 5:
+            verfeinert = dict(einwand)
+            verfeinert["antwort"] = out
+            return verfeinert
+    except Exception:
+        pass
+    return einwand
+
+
+def einwaende_fuer_lead(
+    lead: dict, *, angebot: str = "", anzahl: int = 5, llm: Optional[LLM] = None,
+) -> list[dict]:
     """Lead-spezifische Einwände: wahrscheinlichster zuerst, danach pro Firma variierte
     „Weitere". Jeder Einwand: ``{frage, antwort, ziel, naechster_schritt}``.
 
     Deterministisch (0 €): Auswahl + Reihenfolge ergeben sich aus Signal und Firmenname,
     die Texte werden mit Firma/Branche/Anlass/Angebot interpoliert. Kein Template-Spam —
     zwei Firmen mit gleichem Signal bekommen unterschiedliche „Weitere"-Sets.
+
+    ``llm`` (optional): verfeinert die Antwort des Top-Einwands individuell auf die Firma.
+    Ohne LLM (kein Key/Quota/Fehler) bleibt die deterministische Antwort — nie ein Crash.
     """
     signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
     plan = _SIGNAL_EINWAND_PLAN.get(signal, _FALLBACK_PLAN)
@@ -290,7 +322,12 @@ def einwaende_fuer_lead(lead: dict, *, angebot: str = "", anzahl: int = 5) -> li
     else:
         chosen = _FALLBACK_PLAN[: max(int(anzahl), 1)]
     ctx = _einwand_ctx(lead, angebot)
-    return [_fmt_einwand(k, ctx) for k in chosen]
+    einwaende = [_fmt_einwand(k, ctx) for k in chosen]
+    # LLM verfeinert nur den sichtbarsten (Top-)Einwand → 1 Call/Lead, Kosten gedeckelt,
+    # macht die Gesprächsführung je Ansprechpartner spürbar individuell.
+    if llm is not None and einwaende:
+        einwaende[0] = _verfeinere_einwand_antwort(einwaende[0], lead, llm)
+    return einwaende
 
 
 def einwaende_fuer_signal(signal_typ: str) -> list[dict]:
@@ -310,7 +347,7 @@ def briefing_erstellen(lead: dict, *, angebot: str = "", llm: Optional[LLM] = No
     return {
         "kurzprofil": firmen_kurzprofil(lead, llm=llm),
         "opener": (lead.get("aufhaenger") or "").strip(),
-        "einwaende": einwaende_fuer_lead(lead, angebot=angebot),
+        "einwaende": einwaende_fuer_lead(lead, angebot=angebot, llm=llm),
     }
 
 
