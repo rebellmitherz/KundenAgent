@@ -399,11 +399,24 @@ class EngineBridge:
         # ICP-Fit-Falle (Regel 7): der ICP ist bewusst breit (gewerblicher
         # Mittelstand + Trigger), wenn entweder (a) der Operator „Branche egal"
         # gewählt hat (horizontale Angebote wie Kaltakquise) ODER (b) das Signal-Set
-        # ein Versicherungs-Set ist. Dann darf das Gate nicht alles wegen Branchen-
-        # Abweichung rejecten — die harten Regeln 1–6 bleiben voll in Kraft, das
-        # Discovery-Schutznetz (ATS/Groß-Marke/Recruiter) sowieso.
+        # ein Versicherungs-Set ist ODER (c) die Zielgruppe ein reines Rollen-/
+        # Funktionswort ist (z. B. „Vertrieb"). Letzteres ist KEINE Branche, sondern
+        # ein horizontales Ziel — ohne diesen Zweig deckelt Gate-Regel 7 dann JEDEN
+        # Lead auf REVIEW (ICP „nicht prüfbar") → 0 Premium. Genau das passierte im
+        # Operator-Lauf mit Zielgruppe „Vertrieb". Greift als Backstop für UI UND
+        # Operator-Skripte. Dann darf das Gate nicht alles wegen Branchen-Abweichung
+        # rejecten — die harten Regeln 1–6 bleiben voll in Kraft, das Discovery-
+        # Schutznetz (ATS/Groß-Marke/Recruiter) sowieso.
         from product.bridge import angebot_signale as _as
-        _icp_breit = bool(branche_egal) or _as.ist_versicherungs_signalset(signal_typen)
+        from product.bridge import signal_discovery as _sd_icp
+        _ziel_rollenwort = _sd_icp.ist_rollenwort(getattr(auftrag, "zielgruppe", "") or "")
+        _icp_breit = (bool(branche_egal)
+                      or _as.ist_versicherungs_signalset(signal_typen)
+                      or _ziel_rollenwort)
+        if _ziel_rollenwort and not branche_egal:
+            print(f"[signal] Zielgruppe „{getattr(auftrag, 'zielgruppe', '') or '—'}" + "“ "
+                  "ist ein Rollen-/Funktionswort (keine Branche) -> ICP breit/horizontal "
+                  "(sonst deckelt Gate-Regel 7 alles auf REVIEW).", flush=True)
 
         # ── Gestufte Eskalation (Teil 2) ────────────────────────────────────
         # Erst die gewählte Stadt; reichen die echten PREMIUM nicht, automatisch

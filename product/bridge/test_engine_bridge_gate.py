@@ -247,3 +247,42 @@ def test_eskalation_ohne_stadt_nur_eine_stufe(monkeypatch):
     res = b.suchen_per_signal(_FakeAuftrag("", ziel=5), "sales_hiring")
     assert res.ok and res.leads_sauber == 1
     assert calls == [""]
+
+
+# ── ICP breit bei Rollenwort-Zielgruppe (Regression „Vertrieb → 0 Premium") ──
+def _spy_icp_breit(monkeypatch):
+    """Fängt das an _gate_ausgabe übergebene icp_breit-Flag ab."""
+    cap = {}
+    orig = eb._gate_ausgabe
+    def spy(leads, *, ziel, zielbranche, nur_premium=False, icp_breit=False):
+        cap["icp_breit"] = icp_breit
+        return orig(leads, ziel=ziel, zielbranche=zielbranche,
+                    nur_premium=nur_premium, icp_breit=icp_breit)
+    monkeypatch.setattr(eb, "_gate_ausgabe", spy)
+    return cap
+
+
+def test_rollenwort_zielgruppe_setzt_icp_breit(monkeypatch):
+    # Zielgruppe „Vertrieb" ist ein Rollen-/Funktionswort (keine Branche). Ohne
+    # breiten ICP deckelt Gate-Regel 7 JEDEN Lead auf REVIEW → 0 Premium (echte
+    # Regression aus dem Operator-Lauf). Der Backstop muss icp_breit erzwingen.
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    cap = _spy_icp_breit(monkeypatch)
+    b, _ = _stub_bridge([([_premium()], [_FakeFirma()])])
+    res = b.suchen_per_signal(
+        _FakeAuftrag("Berlin", ziel=1, zielgruppe="Vertrieb"), "sales_hiring")
+    assert cap["icp_breit"] is True
+    assert res.ok and res.leads_sauber == 1
+
+
+def test_echte_branche_laesst_icp_eng(monkeypatch):
+    # Echte Branche (kein Rollenwort, kein Branche-egal, kein Versicherungs-Set) →
+    # ICP bleibt eng, Regel 7 aktiv (kein versehentliches Aufweichen).
+    monkeypatch.delenv("SIGNAL_ZIEL_PREMIUM", raising=False)
+    monkeypatch.delenv("SIGNAL_MAX_STUFEN", raising=False)
+    cap = _spy_icp_breit(monkeypatch)
+    b, _ = _stub_bridge([([_premium()], [_FakeFirma()])])
+    b.suchen_per_signal(
+        _FakeAuftrag("Berlin", ziel=1, zielgruppe="Maschinenbau"), "sales_hiring")
+    assert cap["icp_breit"] is False
