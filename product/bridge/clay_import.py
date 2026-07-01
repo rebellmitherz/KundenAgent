@@ -1,19 +1,24 @@
 """Merge-back der Clay/Findymail-angereicherten CSV auf die bestehenden Leads.
 
 Gegenstück zu ``clay_export``. Der KundenAgent hat die reichen Lead-Objekte
-(Briefing, Einwände, Mail, Score, ``premium_klasse``) — Clay liefert NUR
-Kontaktdaten (persönliche Mail, Mail-Status, Durchwahl/Mobil). Dieser Merge
-führt beides zusammen, OHNE die Premium-Felder zu berühren.
+(Briefing, Einwände, Mail, Score, ``premium_klasse``) UND die Zentrale-Telefon-
+nummer aus dem Impressum. Die externe Anreicherung (Clay/harvestapi) liefert
+NUR die persönliche Mail (+ Mail-Status, optional Ansprechpartner-Name) —
+NIEMALS Telefon/Durchwahl. Das Telefon ist ausdrücklich Sache des KundenAgenten
+(Zentrale immer, Durchwahl nur wenn er sie gratis findet); eine Durchwahl über
+Clay zu kaufen ist zu teuer und daher bewusst NICHT Teil dieses Merges. Der
+Merge führt Mail + Premium-Objekt zusammen, OHNE die Premium-Felder zu berühren.
 
 HARTE REGELN (aus LESSONS_LEARNED):
 - NIEMALS ``import_cli.py`` — das würde Briefing/Einwände/Mail/Score zerstören.
-- Nur die Kontaktfelder werden geschrieben; alles Interne bleibt unangetastet.
+- Nur die Kontaktfelder (Mail + Name) werden geschrieben; Telefon NICHT aus Clay;
+  alles Interne bleibt unangetastet.
 - Match primär über die **Domain** (stabiler Business-Key; ``lead_id`` aus
   ``latest/signal_leads.json`` ist oft leer → positionsbasierter Fallback wäre
   fragil). ``lead_id``/Firmenname sind Zusatz-Bestätigung.
 
 Robust gegen Clays reale Spaltennamen: ``_ALIASES`` deckt gängige Namen ab
-(Work/Personal Email, Mobile/Direct Dial, Email Status). Nutzt Clay einen
+(Work/Personal Email, Email Status, Ansprechpartner-Name). Nutzt Clay einen
 exotischen Namen, ergänzt man dort EINE Zeile — kein Umbau nötig.
 
 Reine Lese-/Merge-Logik: kein b2bbot, keine API, keine Kosten.
@@ -39,10 +44,9 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "email_status", "email_verification", "email_verification_status",
         "verification_status", "email_state", "status", "verified", "deliverability",
     ),
-    "mobile_phone": (
-        "mobile_phone", "mobile_number", "mobile", "direct_dial", "direct_phone",
-        "direct_number", "phone_number", "phone", "cell_phone", "personal_phone",
-    ),
+    # Telefon wird BEWUSST NICHT aus Clay gemappt — die Zentrale hat der Agent
+    # schon, Durchwahl über Clay wäre zu teuer (Emilio, 2026-07-01). Kein
+    # ``mobile_phone``/``direct_dial``-Alias mehr.
     "verified_name": (
         "verified_name", "full_name_verified", "contact_name", "person_name",
     ),
@@ -101,12 +105,14 @@ def _hat_persoenliche_mail(lead: dict) -> bool:
 
 def ist_auslieferbar(lead: dict) -> bool:
     """v1-Kanal-Gate (Emilios Latte für die erste Runde): auslieferbar, wenn eine
-    persönliche Mail ODER eine plausible Telefonnummer (Durchwahl/Mobil ODER
-    Zentrale) vorliegt. Durchwahl-Pflicht kommt erst nach dem ersten Kunden.
+    persönliche Mail (aus der Anreicherung) ODER eine plausible Telefonnummer des
+    KundenAgenten (Zentrale/Durchwahl aus dem Impressum) vorliegt. Das Telefon
+    kommt vom Agenten, NICHT aus Clay — darum werden hier nur die Agent-Felder
+    geprüft. Durchwahl-Pflicht kommt erst nach dem ersten Kunden.
     """
     if _hat_persoenliche_mail(lead):
         return True
-    for feld in ("mobile_phone", "direct_dial", "phone", "phone_clean"):
+    for feld in ("phone", "central_phone", "phone_clean", "telefon"):
         if ist_plausible_telefonnummer(lead.get(feld) or ""):
             return True
     return False
@@ -118,7 +124,7 @@ def merge_kontakt(leads: list[dict], enriched: list[dict], smap: dict[str, str])
     Premium-Felder (briefing/einwaende/personalisierte_mail/premium_klasse/score)
     bleiben unangetastet. Gibt eine kleine Statistik zurück.
     """
-    stats = {"gematcht": 0, "pers_mail_gesetzt": 0, "mobil_gesetzt": 0,
+    stats = {"gematcht": 0, "pers_mail_gesetzt": 0,
              "name_ergaenzt": 0, "ohne_match": 0}
     # Index der Leads nach Domain (erster Treffer gewinnt).
     nach_domain: dict[str, dict] = {}
@@ -152,12 +158,8 @@ def merge_kontakt(leads: list[dict], enriched: list[dict], smap: dict[str, str])
                 lead["email_source_type"] = "clay_enrichment"
             stats["pers_mail_gesetzt"] += 1
 
-        mobil = _wert("mobile_phone")
-        if mobil and ist_plausible_telefonnummer(mobil):
-            lead["mobile_phone"] = mobil
-            lead["direct_dial"] = mobil
-            lead["has_direct_dial"] = True
-            stats["mobil_gesetzt"] += 1
+        # Telefon wird NICHT aus der Anreicherung übernommen (Zentrale hat der
+        # Agent, Durchwahl über Clay ist zu teuer). Bewusst kein Telefon-Merge.
 
         vname = _wert("verified_name")
         if vname and not (lead.get("contact_full_name") or "").strip():

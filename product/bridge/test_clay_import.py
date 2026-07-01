@@ -21,7 +21,7 @@ def test_spalten_map_erkennt_gaengige_clay_namen():
     header = ["lead_id", "domain", "Work Email", "Mobile Number", "Email Status"]
     smap = ci.spalten_map(header)
     assert smap["personal_email"] == "Work Email"
-    assert smap["mobile_phone"] == "Mobile Number"
+    assert "mobile_phone" not in smap          # Telefon wird NICHT aus Clay gemappt
     assert smap["email_status"] == "Email Status"
     assert smap["domain"] == "domain"
 
@@ -30,7 +30,7 @@ def test_spalten_map_alternative_namen():
     header = ["lead_id", "company_domain", "Verified Email", "Direct Dial"]
     smap = ci.spalten_map(header)
     assert smap["personal_email"] == "Verified Email"
-    assert smap["mobile_phone"] == "Direct Dial"
+    assert "mobile_phone" not in smap          # Direct Dial wird ignoriert
     assert smap["domain"] == "company_domain"
 
 
@@ -56,7 +56,7 @@ def test_merge_kontakt_setzt_nur_kontaktfelder():
     assert it["clay_personal_email"] == "udo.wenker@itebo.de"
     assert it["email"] == "udo.wenker@itebo.de"           # generisch -> gehoben
     assert it["is_generic_email"] is False
-    assert it["mobile_phone"] == "+4915112345678"
+    assert "mobile_phone" not in it                        # Telefon NICHT aus Clay übernommen
     assert it["clay_email_status"] == "valid"
     # Premium-Inhalt UNBERÜHRT:
     assert it["briefing"] == {"kurzprofil": "X"}
@@ -82,8 +82,9 @@ def test_merge_ohne_domain_match():
 # ─── Kanal-Gate ─────────────────────────────────────────────────────────────
 def test_ist_auslieferbar():
     assert ci.ist_auslieferbar({"email": "max.mueller@firma.de"}) is True        # pers. Mail
-    assert ci.ist_auslieferbar({"email": "info@firma.de", "phone": "+4954196310"}) is True  # Zentrale ok
-    assert ci.ist_auslieferbar({"email": "info@firma.de", "mobile_phone": "+4915112345678"}) is True
+    assert ci.ist_auslieferbar({"email": "info@firma.de", "phone": "+4954196310"}) is True  # Zentrale (Agent) ok
+    # Ein Clay-„mobile_phone" allein macht NICHT auslieferbar — Telefon kommt vom Agenten:
+    assert ci.ist_auslieferbar({"email": "info@firma.de", "mobile_phone": "+4915112345678"}) is False
     assert ci.ist_auslieferbar({"email": "info@firma.de", "phone": "+4900000001728"}) is False  # Fake + generisch
     assert ci.ist_auslieferbar({"email": "info@firma.de"}) is False              # nur generisch, kein Tel
 
