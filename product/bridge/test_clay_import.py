@@ -82,6 +82,9 @@ def test_merge_ohne_domain_match():
 # ─── Kanal-Gate ─────────────────────────────────────────────────────────────
 def test_ist_auslieferbar():
     assert ci.ist_auslieferbar({"email": "max.mueller@firma.de"}) is True        # pers. Mail
+    # Rollen-/Abteilungs-Postfach zaehlt NICHT als Mail-Kanal:
+    assert ci.ist_auslieferbar({"email": "technik@firma.de"}) is False
+    assert ci.ist_auslieferbar({"email": "technik@firma.de", "phone": "+4954196310"}) is True  # aber Zentrale
     assert ci.ist_auslieferbar({"email": "info@firma.de", "phone": "+4954196310"}) is True  # Zentrale (Agent) ok
     # Ein Clay-„mobile_phone" allein macht NICHT auslieferbar — Telefon kommt vom Agenten:
     assert ci.ist_auslieferbar({"email": "info@firma.de", "mobile_phone": "+4915112345678"}) is False

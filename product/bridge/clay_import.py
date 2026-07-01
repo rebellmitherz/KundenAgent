@@ -30,7 +30,7 @@ import json
 import re
 from pathlib import Path
 
-from product.bridge.clay_export import domain_aus_website
+from product.bridge.clay_export import domain_aus_website, ist_persoenliche_mail
 from product.bridge.signal_contact_enrich import _ist_generisch, ist_plausible_telefonnummer
 
 # ─── Spalten-Aliase: internes Feld → mögliche (normalisierte) Clay-Header ────
@@ -99,16 +99,21 @@ def _zeile_domain(zeile: dict, smap: dict[str, str]) -> str:
 
 
 def _hat_persoenliche_mail(lead: dict) -> bool:
+    """Echte Personen-Mail (kein Rollen-/Abteilungs-Postfach)? Nutzt die strenge
+    ``clay_export.ist_persoenliche_mail`` — damit ``technik@``/``info@`` NICHT als
+    auslieferbarer Kanal durchgehen (nur echte persönliche Mail zählt als Mail-Kanal).
+    """
     mail = (lead.get("email") or "").strip()
-    return bool(mail) and not _ist_generisch(mail)
+    return bool(mail) and ist_persoenliche_mail(mail)
 
 
 def ist_auslieferbar(lead: dict) -> bool:
     """v1-Kanal-Gate (Emilios Latte für die erste Runde): auslieferbar, wenn eine
-    persönliche Mail (aus der Anreicherung) ODER eine plausible Telefonnummer des
-    KundenAgenten (Zentrale/Durchwahl aus dem Impressum) vorliegt. Das Telefon
-    kommt vom Agenten, NICHT aus Clay — darum werden hier nur die Agent-Felder
-    geprüft. Durchwahl-Pflicht kommt erst nach dem ersten Kunden.
+    ECHTE persönliche Mail (Personen-Name, kein Rollen-/Abteilungs-Postfach) ODER
+    eine plausible Telefonnummer des KundenAgenten (Zentrale/Durchwahl aus dem
+    Impressum) vorliegt. Das Telefon kommt vom Agenten, NICHT aus Clay — darum
+    werden hier nur die Agent-Felder geprüft. Durchwahl-Pflicht kommt erst nach
+    dem ersten Kunden.
     """
     if _hat_persoenliche_mail(lead):
         return True
