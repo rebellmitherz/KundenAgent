@@ -246,11 +246,23 @@ _ATS_PLATTFORMEN = {
     "stellenanzeigen", "jobscout", "meinestadt",
 }
 # Personaldienstleister/Recruiting: vermitteln Personal, kaufen selbst keinen
-# Akquise-Bot → Abschlag (Substring, da meist Teil eines längeren Namens).
+# Akquise-Bot → HARTE Verwerfung (Substring, da meist Teil eines längeren Namens).
 _RECRUITING_BEGRIFFE = (
     "e-recruiting", "recruiting", "personalvermittl", "personalberatung",
     "personaldienstleist", "zeitarbeit", "headhunt", "staffing",
 )
+# Vertriebs-/Marketing-/Callcenter-Agenturen: verkaufen AKQUISE selbst als
+# Dienstleistung → sind nie Käufer eines Akquise-Bots (eher Wettbewerb). HART raus.
+# `_AGENTUR_BEGRIFFE` als Substring (Firmenname), `_AGENTUR_TOKENS` als eigenes
+# Token (z. B. „Compris Sales" → Vertriebsagentur; ein Handwerker heißt nie „… Sales").
+_AGENTUR_BEGRIFFE = (
+    "telemarketing", "callcenter", "call-center", "call center",
+    "dialogmarketing", "leadgenerierung", "lead-generierung", "leadgen",
+    "vertriebsagentur", "vertriebsservice", "vertriebsoutsourcing",
+    "salesagentur", "sales-agentur", "outboundservice", "akquiseservice",
+    "neukundengewinnung",
+)
+_AGENTUR_TOKENS = frozenset({"sales", "outbound"})
 # Bekannte Groß-Marken (Stichprobe, erweiterbar) → harte Verwerfung. Ein
 # kleiner Akquise-Bot ist für sie kein Thema; sie verbrennen nur Limits + CRM-Platz.
 _GROSSMARKEN = {
@@ -293,6 +305,13 @@ def _ist_ats_plattform(match_name: str) -> bool:
 
 def _ist_recruiting(match_name: str) -> bool:
     return any(b in match_name for b in _RECRUITING_BEGRIFFE)
+
+
+def _ist_agentur(match_name: str) -> bool:
+    """True wenn der Firmenname eine Vertriebs-/Akquise-Agentur verrät (kein ICP)."""
+    if any(b in match_name for b in _AGENTUR_BEGRIFFE):
+        return True
+    return bool(_name_tokens(match_name) & _AGENTUR_TOKENS)
 
 
 def _ist_grossmarke(match_name: str) -> bool:
@@ -356,6 +375,10 @@ def _fit_bewerten(firma: str, titel: str, industry: str, city: str, signal_type:
         return 0.0, "discard"
     if _ist_grossmarke(name):
         return 0.0, "discard"
+    if _ist_recruiting(name):                 # Personaldienstleister → kein Käufer
+        return 0.0, "discard"
+    if _ist_agentur(name):                    # Vertriebs-/Akquise-Agentur → kein Käufer
+        return 0.0, "discard"
 
     hay = f"{firma} {titel}".lower()
     # ICP-Fit gegen die ECHTE Branche: Rollen-/Funktionswörter (z. B. „Vertrieb")
@@ -380,10 +403,8 @@ def _fit_bewerten(firma: str, titel: str, industry: str, city: str, signal_type:
     if any(t in hay for t in sig_terms):
         score += w_sig
 
-    if _ist_recruiting(name):
-        score -= 0.3
-    if _ist_grosskonzern_struktur(name):
-        score -= 0.35
+    if _ist_grosskonzern_struktur(name):      # „… Deutschland GmbH"/AG → Abschlag
+        score -= 0.35                          #   (kann selten doch Mittelstand sein)
 
     score = round(max(0.0, min(1.0, score)), 3)
 

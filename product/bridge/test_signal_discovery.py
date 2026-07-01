@@ -63,14 +63,33 @@ def test_fit_bewerten_grossmarke_hart_verwerfen():
     assert status == "discard" and score == 0.0, (score, status)
 
 
-def test_fit_bewerten_recruiting_abschlag():
-    # Personaldienstleister: würde sonst (Stadt+Signal) maybe_fit erreichen,
-    # bekommt aber einen Abschlag → weak_fit.
+def test_fit_bewerten_recruiting_hart_verwerfen():
+    # Personaldienstleister vermitteln Personal, kaufen keinen Akquise-Bot → HART raus.
     score, status = sd._fit_bewerten(
         "XY Personalvermittlung GmbH", "Sales Manager Hamburg",
         industry="Unternehmensberatung", city="Hamburg", signal_type="sales_hiring",
     )
-    assert status == "weak_fit", (score, status)
+    assert status == "discard" and score == 0.0, (score, status)
+
+
+def test_fit_bewerten_agentur_hart_verwerfen():
+    # Vertriebs-/Akquise-Agentur (real: "Compris Sales") ist kein Käufer → HART raus.
+    for firma in ("Compris Sales", "ABC Telemarketing GmbH", "XY Vertriebsagentur"):
+        score, status = sd._fit_bewerten(
+            firma, "Sales Manager gesucht",
+            industry="IT", city="Ludwigsburg", signal_type="sales_hiring",
+        )
+        assert status == "discard" and score == 0.0, (firma, score, status)
+
+
+def test_fit_bewerten_kmu_mit_vertrieb_bleibt():
+    # Ein echtes KMU ohne Agentur-/Recruiter-Marker bleibt (kein Fehl-Discard).
+    for firma in ("Müller Maschinenbau GmbH", "Bautzen Sanitär-Heinze GmbH", "Sanitär Schmidt"):
+        _, status = sd._fit_bewerten(
+            firma, "Vertriebsmitarbeiter (m/w/d)",
+            industry="Maschinenbau", city="", signal_type="sales_hiring",
+        )
+        assert status != "discard", (firma, status)
 
 
 def test_fit_bewerten_echte_firma_bleibt():
