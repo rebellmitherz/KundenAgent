@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlparse
-
-from product.bridge.signal_contact_enrich import _ist_generisch
 
 # Spalten-Vertrag (Reihenfolge = CSV-Reihenfolge). ``lead_id`` ist der Join-Key.
 CLAY_SPALTEN = [
@@ -50,14 +49,54 @@ def domain_aus_website(url: str) -> str:
     return host.split(":")[0]  # Port abschneiden, falls vorhanden
 
 
-def hat_persoenliche_mail(lead: dict) -> bool:
-    """True, wenn der Lead schon eine persönliche (nicht generische) Mail hat.
+# Rollen-/Abteilungs-/Funktions-Postfächer: gelten NICHT als persönliche Mail.
+# Bewusst LOKAL für die Anreicherungs-Entscheidung — NICHT das globale
+# ``_ist_generisch`` (das hängt am Premium-Gate). Emilio 2026-07-01: Abteilungs-
+# Adressen wie ``technik@`` dürfen nicht als „Entscheider-Mail" durchgehen.
+_ROLLEN_WORTE = {
+    "info", "kontakt", "contact", "service", "kundenservice", "support", "office",
+    "buero", "büro", "mail", "email", "zentrale", "empfang", "sekretariat",
+    "verwaltung", "buchhaltung", "rechnung", "rechnungen", "einkauf", "bestellung",
+    "vertrieb", "sales", "marketing", "presse", "pr", "karriere", "jobs", "job",
+    "bewerbung", "recruiting", "hr", "personal", "datenschutz", "privacy", "hinweis",
+    "gruppe", "group", "team", "shop", "store", "redaktion", "online", "webmaster",
+    "admin", "noreply", "reply", "hallo", "hello", "moin", "willkommen", "post",
+    "technik", "technical", "it", "edv", "geschaeftsfuehrung", "gf", "vorstand",
+    "leitung", "netzanschluss", "netzanschluesse", "tankstelle", "tankstellen",
+    "filiale", "standort", "zentraleinkauf", "mailbox",
+}
 
-    Solche Leads brauchen kein Clay mehr (z. B. weil harvestapi die Mail schon
-    geholt hat) → sie werden aus der Clay-Input-CSV herausgehalten.
+
+def ist_persoenliche_mail(addr: str) -> bool:
+    """Heuristik: sieht die lokale Adresse (vor ``@``) nach einer PERSON aus?
+
+    persönlich       = zwei Namensteile (``vorname.nachname`` / ``t.heyen`` /
+                       ``mueller-schmidt``) und KEIN Teil ist ein Rollenwort.
+    NICHT persönlich  = Rollen-/Abteilungswort (``info``, ``technik``, ``gf`` …)
+                       ODER Einzel-Token ohne Namens-Trenner (``duesseldorf``).
+    Konservativ Richtung Qualität: im Zweifel NICHT persönlich → der Lead geht in
+    die Anreicherung (lieber einmal zu viel angereichert als eine Abteilungs-
+    Adresse als Entscheider-Mail ausgeliefert).
+    """
+    local = (addr or "").split("@", 1)[0].strip().lower()
+    if not local:
+        return False
+    tokens = [t for t in re.split(r"[._\-]+", local) if t]
+    if any(t in _ROLLEN_WORTE for t in tokens):
+        return False
+    return len(tokens) >= 2
+
+
+def hat_persoenliche_mail(lead: dict) -> bool:
+    """True, wenn der Lead schon eine persönliche Mail (echter Personen-Name) hat.
+
+    Solche Leads brauchen keine Anreicherung/Clay mehr → sie werden aus der
+    Clay-Input-CSV herausgehalten. Nutzt die strengere ``ist_persoenliche_mail``
+    (Rollen-/Abteilungs-Postfächer zählen NICHT), damit z. B. ``technik@`` nicht
+    fälschlich als „fertig" gilt.
     """
     mail = (lead.get("email") or "").strip()
-    return bool(mail) and not _ist_generisch(mail)
+    return bool(mail) and ist_persoenliche_mail(mail)
 
 
 def namen_split(full: str) -> tuple[str, str]:

@@ -130,3 +130,29 @@ def test_leads_zu_csv_leer(tmp_path):
     n = ce.leads_zu_csv([], ziel)
     assert n == 0
     assert ziel.exists()  # nur Header
+
+
+# ─── ist_persoenliche_mail / hat_persoenliche_mail (Rollen-Postfach-Gate) ─────
+
+def test_ist_persoenliche_mail_echte_person():
+    for addr in ["t.heyen@personal-holding.de", "Marco.Schubert@elflein.de",
+                 "markus.steinke@warumbkv.de", "g.tschacher@bav-ingenieure.de",
+                 "christian.viertel@viertel-motoren.de", "c.arora@pinguin-system.de",
+                 "anne-marie.schmidt@x.de"]:
+        assert ce.ist_persoenliche_mail(addr) is True, addr
+
+
+def test_ist_persoenliche_mail_rollen_und_abteilung():
+    for addr in ["info@enigmania.de", "technik@petec.de", "tankstellen@gascom.de",
+                 "netzanschluesse@netz-leipzig.de", "hinweis@spedition-zurek.de",
+                 "gruppe@schneiderworx.de", "shop@jobrad-loop.com",
+                 "online-redaktion@leipzig.de", "duesseldorf@artus-sanierung.de",
+                 "gf@pinguin-system.de", "kundenservice@x.de"]:
+        assert ce.ist_persoenliche_mail(addr) is False, addr
+
+
+def test_hat_persoenliche_mail_lead():
+    assert ce.hat_persoenliche_mail({"email": "g.tschacher@bav-ingenieure.de"}) is True
+    assert ce.hat_persoenliche_mail({"email": "technik@petec.de"}) is False
+    assert ce.hat_persoenliche_mail({"email": ""}) is False
+    assert ce.hat_persoenliche_mail({}) is False

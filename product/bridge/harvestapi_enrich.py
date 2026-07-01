@@ -29,9 +29,12 @@ from pathlib import Path
 # Root in den Pfad, damit auch der Standalone-Aufruf (py …/harvestapi_enrich.py) geht.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from product.bridge.clay_export import domain_aus_website
+from product.bridge.clay_export import (
+    domain_aus_website,
+    hat_persoenliche_mail as _hat_persoenliche_mail,
+    ist_persoenliche_mail,
+)
 from product.bridge.linkedin_profil import _apify_key
-from product.bridge.signal_contact_enrich import _ist_generisch
 
 # Der funktionierende Free-API-Actor (dev_fusion ist auf Free API-gesperrt).
 _ACTOR = os.environ.get("APIFY_HARVEST_ACTOR", "harvestapi~linkedin-profile-scraper")
@@ -74,7 +77,7 @@ def beste_email(emails: list[dict], lead_domain: str = "") -> dict | None:
     kandidaten = []
     for e in emails or []:
         addr = (e.get("email") or "").strip()
-        if "@" not in addr or _ist_generisch(addr):
+        if "@" not in addr or not ist_persoenliche_mail(addr):
             continue
         if lead_domain and _email_domain(addr) != lead_domain:
             continue
@@ -82,11 +85,6 @@ def beste_email(emails: list[dict], lead_domain: str = "") -> dict | None:
     if not kandidaten:
         return None
     return sorted(kandidaten, key=_rang, reverse=True)[0]
-
-
-def _hat_persoenliche_mail(lead: dict) -> bool:
-    mail = (lead.get("email") or "").strip()
-    return bool(mail) and not _ist_generisch(mail)
 
 
 def _actor_runner(urls: list[str], key: str) -> list[dict]:
