@@ -40,12 +40,21 @@ def main(argv: list[str]) -> int:
         print(f"[export] Keine Leads in {quelle}.")
         return 1
 
-    n = ce.leads_zu_csv(leads, ziel)
-    mit_name = sum(1 for l in leads if (l.get("contact_full_name") or l.get("managing_director") or "").strip())
-    mit_domain = sum(1 for l in leads if (l.get("website") or "").strip())
-    print(f"[export] {n} Leads -> {ziel}")
-    print(f"[export] davon mit Ansprechpartner-Name: {mit_name}/{n} | mit Domain: {mit_domain}/{n}")
-    print("[export] Naechster Schritt: CSV in Clay/Findymail hochladen -> pers. Mail + Durchwahl anreichern.")
+    # Split: Leads mit schon vorhandener persoenlicher Mail (z. B. via harvestapi)
+    # brauchen KEIN Clay -> nur die uebrigen kommen in die Clay-Input-CSV.
+    geloest = [l for l in leads if ce.hat_persoenliche_mail(l)]
+    rest = [l for l in leads if not ce.hat_persoenliche_mail(l)]
+
+    n = ce.leads_zu_csv(rest, ziel)
+    mit_name = sum(1 for l in rest if (l.get("contact_full_name") or l.get("managing_director") or "").strip())
+    mit_domain = sum(1 for l in rest if (l.get("website") or "").strip())
+    print(f"[export] {len(leads)} Leads gesamt: {len(geloest)} schon mit persoenl. Mail (kein Clay noetig) "
+          f"| {n} an Clay -> {ziel}")
+    if rest:
+        print(f"[export] Clay-Rest: mit Ansprechpartner-Name: {mit_name}/{n} | mit Domain: {mit_domain}/{n}")
+        print("[export] Naechster Schritt: diese CSV in Clay hochladen -> nur pers. Mail (+ Ansprechpartner).")
+    else:
+        print("[export] Alle Leads haben eine persoenliche Mail - Clay-Schritt entfaellt.")
     return 0
 
 

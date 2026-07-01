@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
+from product.bridge.signal_contact_enrich import _ist_generisch
+
 # Spalten-Vertrag (Reihenfolge = CSV-Reihenfolge). ``lead_id`` ist der Join-Key.
 CLAY_SPALTEN = [
     "lead_id",
@@ -46,6 +48,16 @@ def domain_aus_website(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host.split(":")[0]  # Port abschneiden, falls vorhanden
+
+
+def hat_persoenliche_mail(lead: dict) -> bool:
+    """True, wenn der Lead schon eine persönliche (nicht generische) Mail hat.
+
+    Solche Leads brauchen kein Clay mehr (z. B. weil harvestapi die Mail schon
+    geholt hat) → sie werden aus der Clay-Input-CSV herausgehalten.
+    """
+    mail = (lead.get("email") or "").strip()
+    return bool(mail) and not _ist_generisch(mail)
 
 
 def namen_split(full: str) -> tuple[str, str]:

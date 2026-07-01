@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--signale", default="", help="Override, kommagetrennt (z.B. 'sales_hiring,appointment_setter').")
     p.add_argument("--branche-egal", action="store_true", help="ICP breit/horizontal (Zielgruppe optional).")
     p.add_argument("--kein-linkedin", action="store_true", help="LinkedIn-URL-Anreicherung aus (spart 1 Serper/Lead).")
+    p.add_argument("--kein-apify-mail", action="store_true",
+                   help="harvestapi-Mail-Anreicherung aus (dann macht ALLES Clay).")
     p.add_argument("--kein-export", action="store_true", help="Keine Clay-CSV am Ende schreiben.")
     p.add_argument("--faktor", default="2", help="SIGNAL_UEBERSUCH_FAKTOR (Serper-Spar; Default 2 statt 3).")
     args = p.parse_args(argv)
@@ -95,6 +97,23 @@ def main(argv: list[str] | None = None) -> int:
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     print(f"[{time.strftime('%H:%M:%S')}] FERTIG: {summary}", flush=True)
+
+    # Mail-Anreicherung: fuer Leads MIT LinkedIn-URL holt harvestapi die persoenliche
+    # Mail (+ Name) direkt -> nur die URL-losen brauchen danach noch Clay. Defensiv:
+    # kein Key/Fehler bricht den Lauf nicht, dann geht wie bisher alles an Clay.
+    if not args.kein_apify_mail and result.ok and leads:
+        from product.bridge import harvestapi_enrich
+        estats = harvestapi_enrich.emails_fuer_leads(leads)
+        print(f"[{time.strftime('%H:%M:%S')}] harvestapi-Mail: {estats}", flush=True)
+        # Angereicherte Leads zurueckschreiben, damit Export/Merge sie sehen.
+        try:
+            _sl = _ROOT / "b2bbot" / "output" / "latest" / "signal_leads.json"
+            _data = json.loads(_sl.read_text(encoding="utf-8"))
+            if isinstance(_data, dict):
+                _data["leads"] = leads
+                _sl.write_text(json.dumps(_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as _exc:  # noqa: BLE001
+            print(f"[run] Warnung: signal_leads.json nicht zurueckgeschrieben ({_exc})", flush=True)
 
     if not args.kein_export and result.ok and leads:
         from product.operator import export_clay_csv
