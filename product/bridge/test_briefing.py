@@ -254,3 +254,31 @@ def test_briefing_erstellen_reicht_llm_an_einwaende():
 
     b = br.briefing_erstellen(_lead("sales_hiring", company_name="Acme GmbH"), llm=fake_llm)
     assert b["einwaende"][0]["antwort"] == "EINWAND-LLM"
+
+
+def test_einwand_prompt_erdet_gegen_recruiting_drift():
+    # A: der Einwand-Prompt muss den Anti-Recruiting-Guardrail + Produktkontext tragen,
+    # damit der LLM den Anlass (Stellenanzeige) nicht mit dem Angebot verwechselt.
+    prompts: list[str] = []
+
+    def spy_llm(prompt: str) -> str:
+        prompts.append(prompt)
+        return "Neu formulierte Antwort auf die Firma bezogen."
+
+    br.einwaende_fuer_lead(_lead("sales_hiring", company_name="Acme GmbH"), llm=spy_llm)
+    assert prompts, "LLM wurde nicht aufgerufen"
+    p = prompts[0].lower()
+    assert "recruiting" in p and "kaufsignal" in p
+    assert "kernaussage" in p  # Vorlagen-Kernaussage soll erhalten bleiben
+
+
+def test_einwand_prompt_versicherung_hat_eigenen_kontext():
+    prompts: list[str] = []
+
+    def spy_llm(prompt: str) -> str:
+        prompts.append(prompt)
+        return "Neu formulierte Versicherungs-Antwort."
+
+    br.einwaende_fuer_lead(_lead("vs_cyber", company_name="Acme GmbH"), llm=spy_llm)
+    assert prompts
+    assert "versicherung" in prompts[0].lower()

@@ -263,21 +263,42 @@ def _fmt_einwand(kategorie: str, ctx: dict) -> dict:
     }
 
 
+def _produkt_kontext(signal: str) -> str:
+    """Erdet den LLM-Prompt: WAS verkauft wird — damit er den Anlass (Stellenanzeige)
+    nicht mit dem Angebot verwechselt und Richtung Recruiting/„Kandidaten" driftet."""
+    if signal.startswith("vs_"):
+        return (
+            "Verkauft wird Versicherungs-/Risikoabsicherung (Gewerbeversicherung). "
+            "Der Anlass ist nur das Kaufsignal, nicht das Angebot."
+        )
+    return (
+        "Verkauft wird Neukundengewinnung / B2B-Akquise (Kaufsignal-Leads, Terminierung). "
+        "WICHTIG: Der Anlass (z. B. eine Stellenanzeige) ist nur das KAUFSIGNAL, das zeigt, "
+        "dass die Firma gerade wächst und Bedarf hat — er ist NICHT das Angebot. Es geht "
+        "NICHT um Personalvermittlung, Recruiting oder das Anbieten von Kandidaten/Bewerbern."
+    )
+
+
 def _verfeinere_einwand_antwort(einwand: dict, lead: dict, llm: LLM) -> dict:
     """Formuliert die Einwand-Antwort per LLM individuell auf die Firma um.
 
-    Die deterministische Antwort bleibt Fallback: fehlender Key, Quota oder Fehler
-    → der Einwand kommt unverändert zurück. Nichts wird erfunden, nur umformuliert.
+    Der Prompt ist auf das ANGEBOT geerdet (``_produkt_kontext``), damit der LLM die
+    Kernaussage der Vorlage behält und nicht abdriftet. Die deterministische Antwort
+    bleibt Fallback: fehlender Key, Quota oder Fehler → Einwand unverändert. Nichts
+    wird erfunden, nur umformuliert.
     """
     firma = (lead.get("company_name") or "die Firma").strip()
     signal = (lead.get("entdeckt_per_signal") or "").strip().lower()
     anlass_noun = _ANLASS.get(signal, _ANLASS_DEFAULT)[1]
     prompt = (
-        "Formuliere diese Antwort auf einen Einwand im B2B-Verkaufsgespräch natürlicher "
+        "Du formulierst die Antwort auf einen Einwand in einem B2B-Verkaufsgespräch neu.\n"
+        f"{_produkt_kontext(signal)}\n"
+        "Behalte die KERNAUSSAGE der bisherigen Antwort bei — formuliere sie nur natürlicher "
         "und individuell auf die Firma. Deutsch, Sie-Form, höchstens 2 Sätze, kein Lob, "
         "keine Floskel, nichts erfinden.\n"
-        f"Firma: {firma}\nAnlass: {anlass_noun}\nEinwand: {einwand['frage']}\n"
-        f"Bisherige Antwort: {einwand['antwort']}\nNur die neue Antwort, sonst nichts:"
+        f"Firma: {firma}\nAnlass/Kaufsignal: {anlass_noun}\nEinwand: {einwand['frage']}\n"
+        f"Bisherige Antwort (Kernaussage beibehalten): {einwand['antwort']}\n"
+        "Nur die neue Antwort, sonst nichts:"
     )
     try:
         out = (llm(prompt) or "").strip().strip('"').strip()
