@@ -303,6 +303,57 @@ def test_person_enrichment_mull_name_abgelehnt():
     assert stats["person_angereichert"] == 0
 
 
+# ─── Fake-Nummer-Filter (2026-07-01) ────────────────────────────────────────
+def test_ist_plausible_telefonnummer_fake_nullen():
+    # real gesehen: Riso-Lead mit langem Nullen-Lauf
+    assert ce.ist_plausible_telefonnummer("+4900000001728") is False
+    assert ce.ist_plausible_telefonnummer("1111111111") is False        # nur 1 Ziffer
+    assert ce.ist_plausible_telefonnummer("+490000") is False           # zu kurz
+
+
+def test_ist_plausible_telefonnummer_echte_nummern():
+    assert ce.ist_plausible_telefonnummer("+4954196310") is True
+    assert ce.ist_plausible_telefonnummer("+49 221 6430460") is True
+    assert ce.ist_plausible_telefonnummer("+4986544750") is True
+
+
+def test_parse_phone_verwirft_fake_nummer():
+    assert ce.parse_phone_de("Tel: +4900000001728") == ""
+    assert ce.parse_phone_de("Fon 0000000000") == ""
+
+
+def test_anreichern_leert_unplausible_vorhandene_nummer():
+    lead = {"phone": "+4900000001728", "phone_clean": "+4900000001728", "has_phone": True}
+    stats = ce.anreichern([lead])
+    # Fake-Nummer entfernt (kein Text mit Ersatz -> bleibt leer)
+    assert not lead.get("phone"), lead.get("phone")
+    assert lead.get("has_phone") is False
+    assert stats["telefon_unplausibel_geleert"] == 1
+
+
+# ─── Namens-Artefakt-Bereinigung (2026-07-01) ───────────────────────────────
+def test_kuerze_namen_artefakt_firmenstruktur():
+    assert ce._kuerze_namen_artefakt("Marius Heinze Niederlassungen") == "Marius Heinze"
+    assert ce._kuerze_namen_artefakt("Harry Ritter Bankinstitut") == "Harry Ritter"
+    assert ce._kuerze_namen_artefakt("Max Mustermann Vertrieb") == "Max Mustermann"
+
+
+def test_kuerze_namen_artefakt_echte_namen_unberuehrt():
+    assert ce._kuerze_namen_artefakt("Udo Wenker") == "Udo Wenker"
+    assert ce._kuerze_namen_artefakt("Gerald Holler") == "Gerald Holler"
+    assert ce._kuerze_namen_artefakt("Anna Bankert") == "Anna Bankert"   # kein "bank"-Fehlschnitt
+
+
+def test_anreichern_kuerzt_und_leert_namen():
+    lead1 = {"contact_full_name": "Marius Heinze Niederlassungen", "website": "x.de"}
+    lead2 = {"contact_full_name": "Zentrale Niederlassung Bayern", "website": "y.de"}
+    stats = ce.anreichern([lead1, lead2])
+    assert lead1["contact_full_name"] == "Marius Heinze"        # gekürzt, echter Name bleibt
+    assert not lead2.get("contact_full_name")                   # reiner Struktur-Müll -> leer
+    assert stats["namen_artefakt_gekuerzt"] >= 1
+    assert stats["mull_namen_bereinigt"] >= 1
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     ok = 0

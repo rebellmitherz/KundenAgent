@@ -47,11 +47,29 @@ def normalize_phone_de(raw: str) -> str:
     return ("+" + digits) if (plus and digits) else digits
 
 
+def ist_plausible_telefonnummer(raw: str) -> bool:
+    """False bei offensichtlich unsinnigen Nummern (Platzhalter/Parse-Artefakt).
+
+    Fängt z. B. ``+4900000001728`` (langer Nullen-Lauf, real gesehen) oder
+    ``1111111111``. Konservativ — echte Nummern haben nie 5 gleiche Ziffern
+    am Stück und mehr als zwei verschiedene Ziffern.
+    """
+    d = re.sub(r"\D", "", raw or "")
+    if not (9 <= len(d) <= 15):
+        return False
+    if re.search(r"(\d)\1{4,}", d):          # >=5 gleiche Ziffern am Stück
+        return False
+    if len(set(d)) <= 2:                      # nur 1–2 verschiedene Ziffern
+        return False
+    return True
+
+
 def parse_phone_de(text: str) -> str:
     """Erste plausible deutsche Telefonnummer aus Freitext; '' wenn keine.
 
     Konservativ, um Falschtreffer (USt-ID, HRB-Nummer, PLZ, Jahreszahl) zu
-    vermeiden: der Kandidat muss mit '+'/'00'/'0' beginnen und 9–15 Ziffern haben.
+    vermeiden: der Kandidat muss mit '+'/'00'/'0' beginnen, 9–15 Ziffern haben
+    und ``ist_plausible_telefonnummer`` bestehen (keine 0000-Platzhalter).
     """
     if not text:
         return ""
@@ -59,7 +77,7 @@ def parse_phone_de(text: str) -> str:
         cand = m.group(1).strip()
         digits = re.sub(r"\D", "", cand)
         startet_wie_tel = cand.startswith("+") or cand.startswith("00") or digits.startswith("0")
-        if startet_wie_tel and 9 <= len(digits) <= 15:
+        if startet_wie_tel and 9 <= len(digits) <= 15 and ist_plausible_telefonnummer(digits):
             return normalize_phone_de(cand)
     return ""
 
@@ -174,6 +192,41 @@ def _ist_mull_name(name: str) -> bool:
     return False
 
 
+# Firmenstruktur-/Sammelbegriffe, die der Scraper HINTER einen echten Namen hängt
+# ("Marius Heinze Niederlassungen", "Harry Ritter Bankinstitut"). Werden als SUFFIX
+# abgeschnitten, solange ein echter Vor+Nachname (>=2 Token) stehen bleibt.
+_NAME_ARTEFAKT_STAEMME = tuple(sorted(_MULL_NAME_FUNKTION | {
+    "bankinstitut", "manufaktur", "cooperation", "kooperation",
+    "unternehmensgruppe", "genossenschaft", "holding",
+}))
+
+
+def _ist_artefakt_wort(wort: str) -> bool:
+    """True wenn `wort` ein Firmenstruktur-/Sammelbegriff ist (auch Plural)."""
+    w = re.sub(r"[^a-zäöüß]", "", (wort or "").lower())
+    if not w:
+        return False
+    return any(
+        w in (stamm, stamm + "en", stamm + "e", stamm + "s")
+        for stamm in _NAME_ARTEFAKT_STAEMME
+    )
+
+
+def _kuerze_namen_artefakt(name: str) -> str:
+    """Schneidet Firmenstruktur-/Sammelbegriffe am ENDE eines Namens ab, solange
+    ein echter Vor+Nachname (>=2 Token) übrig bleibt. Konservativ: nur am Wortende.
+
+    "Marius Heinze Niederlassungen" -> "Marius Heinze". Kein Artefakt -> unverändert.
+    (Bleibt danach nur Struktur-Müll übrig, fängt ihn `_ist_mull_name`.)
+    """
+    if not name:
+        return name
+    teile = name.split()
+    while len(teile) > 2 and _ist_artefakt_wort(teile[-1]):
+        teile = teile[:-1]
+    return " ".join(teile)
+
+
 def _firma_tokens(name: str) -> set[str]:
     # Ziffern BLEIBEN im Token (sonst zerfällt „B2B"→„b" und „3M"→„m") — so bleibt
     # „B2B" als Junk erkennbar und „3M Deutschland" als echte Firma erhalten.
@@ -264,12 +317,19 @@ def _ist_generisch(email: str) -> bool:
 
 
 def _ein_lead(lead: dict, stats: dict, telefon_sucher, person_sucher=None) -> None:
-    # 0) Müll-Namen bereinigen: Scraper greift manchmal Tech-Markennamen oder
-    #    Rechtstexte als GF-Namen (z. B. "Adobe Fonts", "Google Inc"). Leer ist
-    #    besser als falsch — die Mail-Vorschlag-Logik läuft dann einfach leer.
+    # 0) Namen säubern: (a) Firmenstruktur-Suffix abschneiden ("Marius Heinze
+    #    Niederlassungen" -> "Marius Heinze"), (b) bleibt Müll (Tech-Marke,
+    #    Rechtstext, reiner Struktur-Begriff) -> leeren. Leer ist besser als falsch.
     for feld in ("managing_director", "contact_person", "contact_full_name"):
         val = (lead.get(feld) or "").strip()
-        if val and _ist_mull_name(val):
+        if not val:
+            continue
+        gekuerzt = _kuerze_namen_artefakt(val)
+        if gekuerzt != val:
+            val = gekuerzt
+            lead[feld] = gekuerzt
+            stats["namen_artefakt_gekuerzt"] += 1
+        if _ist_mull_name(val):
             lead[feld] = ""
             stats["mull_namen_bereinigt"] += 1
 
@@ -280,6 +340,17 @@ def _ein_lead(lead: dict, stats: dict, telefon_sucher, person_sucher=None) -> No
         if not lead.get("company_name_artefakt"):
             lead["company_name_artefakt"] = True
             stats["firma_artefakt"] += 1
+
+    # 0c) Vorhandene Telefonnummer plausibilisieren: Platzhalter/Parse-Artefakte
+    #     (z. B. "+4900000001728" — langer Nullen-Lauf) leeren, damit die
+    #     Anreicherung unten eine echte sucht und das Gate keine Fake-Nummer als
+    #     "Telefon vorhanden" wertet.
+    vorhandene_tel = (lead.get("phone") or lead.get("phone_clean") or "").strip()
+    if vorhandene_tel and not ist_plausible_telefonnummer(vorhandene_tel):
+        lead["phone"] = ""
+        lead["phone_clean"] = ""
+        lead["has_phone"] = False
+        stats["telefon_unplausibel_geleert"] += 1
 
     # 0.5) Entscheider-Anreicherung (OPT-IN, KOSTENPFLICHTIG). Läuft NUR, wenn ein
     #     person_sucher injiziert wurde (= API-Key gesetzt → sonst None = 0 €) UND
@@ -450,6 +521,7 @@ def anreichern(leads: list[dict], *, telefon_sucher=None, person_sucher=None) ->
     stats = {
         "telefon_aus_text": 0, "telefon_live": 0, "mail_vorschlag": 0,
         "mull_namen_bereinigt": 0, "person_angereichert": 0, "firma_artefakt": 0,
+        "namen_artefakt_gekuerzt": 0, "telefon_unplausibel_geleert": 0,
     }
     for lead in leads or []:
         try:
